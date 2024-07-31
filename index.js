@@ -16,12 +16,17 @@ var passport       = require('passport');
 var OAuth2Strategy = require('passport-oauth').OAuth2Strategy;
 var request        = require('request');
 var handlebars     = require('handlebars');
+const res          = require('express/lib/response');
+var dotenvx        = require('@dotenvx/dotenvx').config()
+const { StaticAuthProvider } = require('@twurple/auth');
+const { ApiClient } = require('@twurple/api');
+const { EventSubWsListener} = require('@twurple/eventsub-ws');
 
 // Define our constants, you will change these with your own
-const TWITCH_CLIENT_ID = '<YOUR CLIENT ID HERE>';
-const TWITCH_SECRET    = '<YOUR CLIENT SECRET HERE>';
-const SESSION_SECRET   = '<SOME SECRET HERE>';
-const CALLBACK_URL     = '<YOUR REDIRECT URL HERE>';  // You can run locally with - http://localhost:3000/auth/twitch/callback
+const TWITCH_CLIENT_ID = process.env.TWITCH_CLIENT_ID;
+const TWITCH_SECRET    = process.env.TWITCH_SECRET;
+const SESSION_SECRET   = process.env.SESSION_SECRET;
+const CALLBACK_URL     = process.env.CALLBACK_URL;  // You can run locally with - http://localhost:3000/auth/twitch/callback
 
 // Initialize Express and middlewares
 var app = express();
@@ -65,7 +70,7 @@ passport.use('twitch', new OAuth2Strategy({
     clientID: TWITCH_CLIENT_ID,
     clientSecret: TWITCH_SECRET,
     callbackURL: CALLBACK_URL,
-    state: true
+    state: false
   },
   function(accessToken, refreshToken, profile, done) {
     profile.accessToken = accessToken;
@@ -80,11 +85,42 @@ passport.use('twitch', new OAuth2Strategy({
   }
 ));
 
+const checkAuthentication = (req, res, next) => {
+  if (req.session && req.session.passport && req.session.passport.user) {
+    return next();
+  }
+  const path = Buffer.from(req.path).toString('base64');
+  res.redirect('/auth/twitch?state=' + path);
+}
+
+const includeRedirectInState = (req, res, next) => {
+  passport.authenticate('twitch', { scope, state: req.query.state })(req, res, next);
+}
+
+const redirectAfterAuthentication = (req, res, next) => {
+  const path = Buffer.from(req.query.state, 'base64').toString('ascii')
+  passport.authenticate('twitch', { successRedirect: path, failureRedirect: '/' })(req, res, next);
+}
+
+const scope = ['user_read', 'channel:read:redemptions', 'user:read:chat'];
+
+const connectToTwitch = async (accessToken) => {
+  const authProvider = new StaticAuthProvider(TWITCH_CLIENT_ID, accessToken, scope);
+  const apiClient = new ApiClient({ authProvider });
+  const listener = new EventSubWsListener({ apiClient });
+
+  return {
+    auth: authProvider,
+    api: apiClient,
+    listener: listener
+  }
+}
+
 // Set route to start OAuth link, this is where you define scopes to request
-app.get('/auth/twitch', passport.authenticate('twitch', { scope: 'user_read' }));
+app.get('/auth/twitch', includeRedirectInState);
 
 // Set route for OAuth redirect
-app.get('/auth/twitch/callback', passport.authenticate('twitch', { successRedirect: '/', failureRedirect: '/' }));
+app.get('/auth/twitch/callback', redirectAfterAuthentication);
 
 // Define a simple template to safely generate HTML with values from user's profile
 var template = handlebars.compile(`
@@ -98,12 +134,47 @@ var template = handlebars.compile(`
 </table></html>`);
 
 // If user has an authenticated session, display it, otherwise display link to authenticate
-app.get('/', function (req, res) {
-  if(req.session && req.session.passport && req.session.passport.user) {
-    res.send(template(req.session.passport.user));
-  } else {
-    res.send('<html><head><title>Twitch Auth Sample</title></head><a href="/auth/twitch"><img src="http://ttv-api.s3.amazonaws.com/assets/connect_dark.png"></a></html>');
+app.get('/', checkAuthentication, async function (req, res) {
+  res.send(template(req.session.passport.user));
+});
+
+let currentListener = null;
+
+app.get('/channel/:channel', checkAuthentication, async function (req, res) {
+  if (currentListener && currentListener !== req.params.channel) {
+    currentListener.stop();
   }
+
+  const { auth, api, listener } = await connectToTwitch(req.session.passport.user.accessToken);
+  
+  const userId = req.session.passport.user.data[0].id
+  const broadcaster = await api.users.getUserByName(req.params.channel);
+
+  listener.start();
+  currentListener = req.params.channel;
+  listener.onChannelChatMessage(broadcaster.id, userId, async event => {
+    if (event.isCheer) {
+      console.log(`[Alert]: ${event.chatterDisplayName} cheered ${event.bits} bits`)
+    } 
+    if (event.isRedemption) {
+      const reward = await api.channelPoints.getCustomRewardById(broadcaster.id, event.rewardId)
+      console.log(`[Alert]: ${event.chatterDisplayName} redeemed ${reward.rewardTitle} - ${reward.rewardPrompt} for ${reward.rewardCost} points`)
+    }
+    console.log(`${event.chatterDisplayName}: ${event.messageText}`)
+  })
+
+  listener.onChannelChatNotification(broadcaster.id, userId, event => {
+    switch (event.type) {
+      case 'community_sub_gift':
+        console.log(`[Alert]: ${event.chatterDisplayName} gifted ${event.amount}, they have gifted ${event.cumulativeAmount} to the channel`)
+        break;
+      default:
+        console.log(`[Alert]: Unhandled notification type: ${event.type}`)
+        break;
+    }
+  })
+
+  res.send(`listening to chat messages from ${broadcaster.displayName} (${req.params.channel})`);
 });
 
 app.listen(3000, function () {
