@@ -18,10 +18,12 @@ var OAuth2Strategy = require('passport-oauth').OAuth2Strategy;
 var request        = require('request');
 var handlebars     = require('handlebars');
 const res          = require('express/lib/response');
-var dotenvx        = require('@dotenvx/dotenvx').config()
+var dotenvx        = require('@dotenvx/dotenvx');
 const { StaticAuthProvider } = require('@twurple/auth');
 const { ApiClient } = require('@twurple/api');
 const { EventSubWsListener} = require('@twurple/eventsub-ws');
+
+dotenvx.config();
 
 // Define our constants, you will change these with your own
 const TWITCH_CLIENT_ID = process.env.TWITCH_CLIENT_ID;
