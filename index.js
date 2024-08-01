@@ -10,6 +10,7 @@ or in the "license" file accompanying this file. This file is distributed on an 
 */
 
 // Define our dependencies
+const util         = require('util');
 var express        = require('express');
 var session        = require('express-session');
 var passport       = require('passport');
@@ -123,7 +124,7 @@ app.get('/auth/twitch', includeRedirectInState);
 app.get('/auth/twitch/callback', redirectAfterAuthentication);
 
 // Define a simple template to safely generate HTML with values from user's profile
-var template = handlebars.compile(`
+var authTemplate = handlebars.compile(`
 <html><head><title>Twitch Auth Sample</title></head>
 <table>
     <tr><th>Access Token</th><td>{{accessToken}}</td></tr>
@@ -133,48 +134,189 @@ var template = handlebars.compile(`
     <tr><th>Image</th><td>{{logo}}</td></tr>
 </table></html>`);
 
-// If user has an authenticated session, display it, otherwise display link to authenticate
-app.get('/', checkAuthentication, async function (req, res) {
-  res.send(template(req.session.passport.user));
+var channelTemplate = handlebars.compile(`
+<html>
+  <head>
+    <link href="https://cdn.jsdelivr.net/npm/beercss@3.6.12/dist/cdn/beer.min.css" rel="stylesheet">
+    <script type="module" src="https://cdn.jsdelivr.net/npm/beercss@3.6.12/dist/cdn/beer.min.js"></script>
+    <script type="module" src="https://cdn.jsdelivr.net/npm/material-dynamic-colors@1.1.2/dist/cdn/material-dynamic-colors.min.js"></script>
+    <title>Channel Feed: {{channel}}</title>
+    <meta http-equiv="refresh" content="{{refresh}}">
+  </head>
+  <body class="dark">
+    <header class="primary">
+      <nav>
+        <h5 class="max">Twitch Monitor</h5>
+      </nav>
+    </header>
+    <main class="responsive">
+      <div class="grid">
+        <div class="s6">
+          {{placeholderIfEmpty "messages" messages}}
+          {{#each messages}}
+            {{chatMessage}}
+          {{/each}}
+        </div>
+        <div class="s6">
+          {{placeholderIfEmpty "alerts" alerts}}
+          {{#each alerts}}
+            <article>
+              <p>{{this.message}}</p>
+            </article>
+          {{/each}}
+        </div>
+      </div>
+    </main>
+  </body>
+</html>`);
+
+handlebars.registerHelper('alertMessage', function () {
+  switch (this.type) {
+    default:
+      return this.message
+  }
 });
 
-let currentListener = null;
+handlebars.registerHelper('chatMessage', function () {
+  let output = '';
+  const badgeString = Object.entries(this.badges)
+    .filter(([id, version]) => Object.hasOwn(badges, id) && Object.hasOwn(badges[id], version))
+    .map(([id, version]) => `<img src="${badges[id][version].getImageUrl(1)}" class="square"/> `)
+    .join('');
+  const message = `<span>${badgeString}</span><span style="color:${this.color}">${this.user}</span> <span>${this.message}</span>`
+  if (this.new) {
+    output = `<article class="surface-bright large-text">${message}</article>`
+  } else {
+    output = `<article>${message}</article>`
+  }
+  return new handlebars.SafeString(output);
+});
+
+const infoSvg = `<svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="#e8eaed"><path d="M440-280h80v-240h-80v240Zm40-320q17 0 28.5-11.5T520-640q0-17-11.5-28.5T480-680q-17 0-28.5 11.5T440-640q0 17 11.5 28.5T480-600Zm0 520q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-83 31.5-156T197-763q54-54 127-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Zm0-80q134 0 227-93t93-227q0-134-93-227t-227-93q-134 0-227 93t-93 227q0 134 93 227t227 93Zm0-320Z"/></svg>`
+
+handlebars.registerHelper('placeholderIfEmpty', function (type, list) {
+  if (list.length === 0) {
+    return new handlebars.SafeString(`<article><i class="tiny">${infoSvg}</i> <span>No ${type} to display.</span></article>`);
+  }
+  return '';
+});
+
+// If user has an authenticated session, display it, otherwise display link to authenticate
+app.get('/', checkAuthentication, async function (req, res) {
+  res.send(authTemplate(req.session.passport.user));
+});
+
+let current = {};
+let alerts = [];
+let messages = [];
+let badges = {};
+const limit = 25;
+const refresh = 5;
+const newDuration = 15;
+
 
 app.get('/channel/:channel', checkAuthentication, async function (req, res) {
-  if (currentListener && currentListener !== req.params.channel) {
-    currentListener.stop();
+  const channel = req.params.channel;
+  if (!channel) {
+    // return 400, no channel specified
+    return res.status(400).send('No channel specified');
+  }
+
+  if (current.channel === channel) {
+    // return the web page, all listeners are already started.
+    res.send(channelTemplate({ channel: current.channel, alerts, messages, refresh }));
+    messages.filter(m => m.new > 0).map(m => m.new--);
+    return;
+  }
+
+  if (current.listener && current.channel !== channel) {
+    current.listener.stop();
+    current = {};
+    messages = [];
+    alerts = [];
+    badges = {};
   }
 
   const { auth, api, listener } = await connectToTwitch(req.session.passport.user.accessToken);
   
   const userId = req.session.passport.user.data[0].id
-  const broadcaster = await api.users.getUserByName(req.params.channel);
+  let broadcaster = null;
+  try {
+    broadcaster = await api.users.getUserByName(req.params.channel);
+  } catch (e) {
+    // return 404, the channel was not found
+    return res.status(404).send(`Channel ${channel} not found`);
+  }
+
+  let globalBadges = [];
+  let channelBadges = [];
+
+  try {
+    globalBadges = await api.chat.getGlobalBadges();
+    channelBadges = await api.chat.getChannelBadges(broadcaster.id);
+  } catch (e) {
+    console.error(`Failed to get badges: ${e}`);
+  }
+
+  globalBadges.forEach(badge => {
+    badges[badge.id] = badge.versions.reduce((acc, version) => { 
+      acc[version.id] = version;
+      return acc 
+    }, {});
+  });
+
+  channelBadges.forEach(badge => {
+    badges[badge.id] = badge.versions.reduce((acc, version) => { 
+      acc[version.id] = version;
+      return acc 
+    }, {});
+  });
 
   listener.start();
-  currentListener = req.params.channel;
+  current.listener = listener;
+  current.channel = broadcaster.name;
+
   listener.onChannelChatMessage(broadcaster.id, userId, async event => {
     if (event.isCheer) {
-      console.log(`[Alert]: ${event.chatterDisplayName} cheered ${event.bits} bits`)
+      alerts.unshift({type: 'cheer', user: event.chatterDisplayName, bits: event.bits, message: `${event.chatterDisplayName} cheered ${event.bits} bits`})
+      alerts.length = limit
     } 
     if (event.isRedemption) {
       const reward = await api.channelPoints.getCustomRewardById(broadcaster.id, event.rewardId)
-      console.log(`[Alert]: ${event.chatterDisplayName} redeemed ${reward.rewardTitle} - ${reward.rewardPrompt} for ${reward.rewardCost} points`)
+      alerts.unshift({type: 'redemption', user: event.chatterDisplayName, reward: event.rewardId, message: `${event.chatterDisplayName} redeemed ${event.rewardTitle} - ${event.rewardPrompt} for ${event.rewardCost} points`})
+      alerts.length = limit
     }
-    console.log(`${event.chatterDisplayName}: ${event.messageText}`)
+    messages.unshift({user: event.chatterDisplayName, badges: event.badges, color: event.color || '#888888', new: Math.ceil(newDuration / refresh), message: event.messageText})
+
+    // event.messageParts.forEach(part => {
+    //   console.log(`${util.inspect(part)}`)
+    // })
+    
+    messages.length = limit
   })
 
   listener.onChannelChatNotification(broadcaster.id, userId, event => {
     switch (event.type) {
       case 'community_sub_gift':
-        console.log(`[Alert]: ${event.chatterDisplayName} gifted ${event.amount}, they have gifted ${event.cumulativeAmount} to the channel`)
+        alerts.unshift({type: 'community_sub_gift', user: event.chatterDisplayName, amount: event.amount, cumulativeAmount: event.cumulativeAmount, message: `${event.chatterDisplayName} gifted ${event.amount}, they have gifted ${event.cumulativeAmount} to the channel`})
+        break;
+      case 'announcement':
+        alerts.unshift({type: 'announcement', user: event.chatterDisplayName, message: event.messageText})
+        break;
+      case 'raid':
+        alerts.unshift({type: 'raid', user: event.raiderDisplayName, viewerCount: event.viewerCount, message: event.messageText})
+        break;
+      case 'sub_gift':
+        alerts.unshift({type: 'sub_gift', user: event.chatterDisplayName, recipient: event.recipientDisplayName, duration: event.durationMonths, message: `${event.chatterDisplayName} gifted a subscription to ${event.recipientDisplayName} for ${event.durationMonths} months`})
         break;
       default:
-        console.log(`[Alert]: Unhandled notification type: ${event.type}`)
+        alerts.unshift({type: 'unknown', user: event.chatterDisplayName, message: `Unhandled notification type: ${event.type}`})
         break;
     }
+    alerts.length = limit
   })
 
-  res.send(`listening to chat messages from ${broadcaster.displayName} (${req.params.channel})`);
+  return res.send(channelTemplate({ channel: current.channel, alerts, messages, refresh: 2 }));
 });
 
 app.listen(3000, function () {
