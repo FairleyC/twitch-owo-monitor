@@ -1,0 +1,5 @@
+- [Twitch API Documentation](https://dev.twitch.tv/docs)
+- [Twurple API Documentation](https://twurple.js.org/)
+- [Twurple GitHub](https://github.com/twurple/twurple/tree/versions/7.1)
+- [Beercss Styling](https://www.beercss.com/)
+- [Handlebars HTML Templates](https://handlebarsjs.com/)

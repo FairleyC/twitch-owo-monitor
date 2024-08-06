@@ -143,20 +143,22 @@ var channelTemplate = handlebars.compile(`
     <script type="module" src="https://cdn.jsdelivr.net/npm/beercss@3.6.12/dist/cdn/beer.min.js"></script>
     <script type="module" src="https://cdn.jsdelivr.net/npm/material-dynamic-colors@1.1.2/dist/cdn/material-dynamic-colors.min.js"></script>
     <title>Channel Feed: {{channel}}</title>
-    <meta http-equiv="refresh" content="{{refresh}}">
   </head>
   <body class="dark">
     <header class="primary">
       <nav>
-        <h5 class="max">Twitch Monitor</h5>
+        <a href="https://www.twitch.tv/{{channel}}" target="_blank">
+          <img src="https://cdn.icon-icons.com/icons2/3042/PNG/512/twitch_logo_icon_189276.png" width="64" height="64" alt="Twitch Logo" />
+        </a>
+        <h5 class="max bold">Twitch Monitor</h5>
       </nav>
     </header>
-    <main class="responsive">
+    <main class="responsive" id="content">
       <div class="grid">
         <div class="s6">
           {{placeholderIfEmpty "messages" messages}}
           {{#each messages}}
-            {{chatMessage}}
+            {{chatMessage ../userId}}
           {{/each}}
         </div>
         <div class="s6">
@@ -169,6 +171,17 @@ var channelTemplate = handlebars.compile(`
         </div>
       </div>
     </main>
+    <script>
+      // Refresh with page scrolled to same position
+      const urlParams = new URLSearchParams(window.location.search);
+      const y = urlParams.get('y');
+      if (y) {
+        document.getElementById('content').scrollTop = y;
+      }
+      setTimeout(() => {
+        window.location.href = window.location.origin + window.location.pathname + '?y=' + document.getElementById('content').scrollTop
+      }, {{refresh}} * 1000)
+    </script>
   </body>
 </html>`);
 
@@ -179,20 +192,61 @@ handlebars.registerHelper('alertMessage', function () {
   }
 });
 
-handlebars.registerHelper('chatMessage', function () {
+handlebars.registerHelper('chatMessage', function (userId) {
   let output = '';
   const badgeString = Object.entries(this.badges)
     .filter(([id, version]) => Object.hasOwn(badges, id) && Object.hasOwn(badges[id], version))
-    .map(([id, version]) => `<img src="${badges[id][version].getImageUrl(1)}" class="square"/> `)
+    .map(([id, version]) => `<img src="${badges[id][version].getImageUrl(1)}" alt="${badges[id][version].title}" class="square"></image> `)
     .join('');
-  const message = `<span>${badgeString}</span><span style="color:${this.color}">${this.user}</span> <span>${this.message}</span>`
+  const content = formatContent(this.messageParts, userId)
+  const message = `<span>${badgeString}</span><span style="color:${this.color}">${this.user}</span>: ${content}`
+
+  let classValue = { color: "", size: "" };
   if (this.new) {
-    output = `<article class="surface-bright large-text">${message}</article>`
-  } else {
-    output = `<article>${message}</article>`
+    classValue.color = 'surface-bright'
+    classValue.size = 'large-text'
   }
+
+  const mentioned = this.messageParts.filter(part => part.type === 'mention').findIndex(part => part.mention.user_id === userId) !== -1
+  if (mentioned) {
+    classValue.color = 'primary-container'
+  }
+
+  output = `<article class="${classValue.color} ${classValue.size}">${message}</article>`
+
   return new handlebars.SafeString(output);
 });
+
+function formatContent(messageParts, userId) {
+  return messageParts.map(part => {
+    switch (part.type) {
+      case 'text':
+        return `<span>${part.text}</span>`
+      case 'cheermote':
+        const displayProps = cheermotes.getCheermoteDisplayInfo(part.cheermote.prefix, part.cheermote.bits, { background: 'dark', scale: 1, state: 'animated' })
+        return `<img src="${displayProps.url}" alt="${part.cheermote.prefix}" class="square"></image><span style="color:${displayProps.color}">${part.cheermote.bits}</span>`
+      case 'emote':
+        if (Object.hasOwn(emotes, part.emote.id)) {
+          const emote = emotes[part.emote.id]
+          const format = emote.formats.slice(-1)[0]
+          const scale = emote.scales[0]
+          const theme = emote.themeModes.slice(-1)[0]
+          let src = emote.getFormattedImageUrl(scale, format, theme)
+          return `<img src="${src}" alt="${part.text}" height="28" width="28" class="square"></image>`
+        } else {
+          return `<span>${part.text}</span>`
+        }
+      case 'mention':
+        let classValue = 'surface-variant square'
+        if (part.mention.user_id === userId) {
+          classValue = 'inverse-surface square'
+        }
+        return `<span class="${classValue}" style="padding: 4px">${part.text}</span>`
+      default:
+        return ``
+    }
+  }).join(' ')
+}
 
 const infoSvg = `<svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="#e8eaed"><path d="M440-280h80v-240h-80v240Zm40-320q17 0 28.5-11.5T520-640q0-17-11.5-28.5T480-680q-17 0-28.5 11.5T440-640q0 17 11.5 28.5T480-600Zm0 520q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-83 31.5-156T197-763q54-54 127-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Zm0-80q134 0 227-93t93-227q0-134-93-227t-227-93q-134 0-227 93t-93 227q0 134 93 227t227 93Zm0-320Z"/></svg>`
 
@@ -211,7 +265,9 @@ app.get('/', checkAuthentication, async function (req, res) {
 let current = {};
 let alerts = [];
 let messages = [];
+let emotes = {};
 let badges = {};
+let cheermotes = {};
 const limit = 25;
 const refresh = 5;
 const newDuration = 15;
@@ -219,19 +275,33 @@ const newDuration = 15;
 
 app.get('/channel/:channel', checkAuthentication, async function (req, res) {
   const channel = req.params.channel;
+  const userId = req.session.passport.user.data[0].id
+
+  //
+  //
+  // Channel not provided.
   if (!channel) {
     // return 400, no channel specified
     return res.status(400).send('No channel specified');
   }
 
-  if (current.channel === channel) {
+  //
+  //
+  // Shortcut
+  const isRefreshCurrentChannel = current.channel === channel
+  if (isRefreshCurrentChannel) {
     // return the web page, all listeners are already started.
-    res.send(channelTemplate({ channel: current.channel, alerts, messages, refresh }));
+    res.send(channelTemplate({ channel: current.channel, alerts, messages, refresh, userId }));
     messages.filter(m => m.new > 0).map(m => m.new--);
     return;
   }
 
-  if (current.listener && current.channel !== channel) {
+  //
+  //
+  // Changing channels
+  const isAlreadyConnectedToChannel = current.listener
+  const isNotTheSameAsCurrentChannel = current.channel !== channel
+  if (isAlreadyConnectedToChannel && isNotTheSameAsCurrentChannel) {
     current.listener.stop();
     current = {};
     messages = [];
@@ -241,7 +311,10 @@ app.get('/channel/:channel', checkAuthentication, async function (req, res) {
 
   const { auth, api, listener } = await connectToTwitch(req.session.passport.user.accessToken);
   
-  const userId = req.session.passport.user.data[0].id
+  //
+  //
+  // lookup channel to find broadcaster
+  // 404 if channel not found
   let broadcaster = null;
   try {
     broadcaster = await api.users.getUserByName(req.params.channel);
@@ -249,7 +322,39 @@ app.get('/channel/:channel', checkAuthentication, async function (req, res) {
     // return 404, the channel was not found
     return res.status(404).send(`Channel ${channel} not found`);
   }
+  
+  //
+  //
+  // emotes
+  let globalEmotes = [];
+  let channelEmotes = [];
+  try {
+    globalEmotes = await api.chat.getGlobalEmotes();
+    channelEmotes = await api.chat.getChannelEmotes(broadcaster.id);
+  } catch (e) {
+    console.error(`Failed to get emotes: ${e}`);
+  }
 
+  globalEmotes.forEach(emote => emotes[emote.id] = emote);
+  channelEmotes.forEach(emote => emotes[emote.id] = emote);
+
+
+
+  //
+  //
+  // cheermotes
+  let globalCheermoteList = {};
+  try {
+    globalCheermoteList = await api.bits.getCheermotes();
+  } catch (e) {
+    console.error(`Failed to get cheermotes: ${e}`);
+  }
+  cheermotes = globalCheermoteList;
+
+
+  //
+  //
+  // badges
   let globalBadges = [];
   let channelBadges = [];
 
@@ -274,26 +379,39 @@ app.get('/channel/:channel', checkAuthentication, async function (req, res) {
     }, {});
   });
 
+  //
+  //
+  // setup eventsub listener
   listener.start();
   current.listener = listener;
   current.channel = broadcaster.name;
 
   listener.onChannelChatMessage(broadcaster.id, userId, async event => {
+    const message = {
+      user: event.chatterDisplayName,
+      color: event.color || '#888888',
+      badges: event.badges,
+      messageParts: event.messageParts,
+    }
     if (event.isCheer) {
-      alerts.unshift({type: 'cheer', user: event.chatterDisplayName, bits: event.bits, message: `${event.chatterDisplayName} cheered ${event.bits} bits`})
+      alerts.unshift(Object.assign({}, message, {type: 'cheer', bits: event.bits, message: `${event.chatterDisplayName} cheered ${event.bits} bits`}))
       alerts.length = limit
     } 
     if (event.isRedemption) {
-      const reward = await api.channelPoints.getCustomRewardById(broadcaster.id, event.rewardId)
-      alerts.unshift({type: 'redemption', user: event.chatterDisplayName, reward: event.rewardId, message: `${event.chatterDisplayName} redeemed ${event.rewardTitle} - ${event.rewardPrompt} for ${event.rewardCost} points`})
+      // error found here: {"error":"Unauthorized","status":401,"message":"The ID in broadcaster_id must match the user ID found in the request's OAuth token."}
+      // const reward = await api.channelPoints.getCustomRewardById(broadcaster.id, event.rewardId)
+      // The authorized user must be the broadcaster to get channel point redemptions
+      alerts.unshift(Object.assign({}, message, {type: 'redemption', reward: event.rewardId, message: `${event.chatterDisplayName} redeemed ${event.rewardTitle} - ${event.rewardPrompt} for ${event.rewardCost} points`}))
       alerts.length = limit
     }
-    messages.unshift({user: event.chatterDisplayName, badges: event.badges, color: event.color || '#888888', new: Math.ceil(newDuration / refresh), message: event.messageText})
 
-    // event.messageParts.forEach(part => {
-    //   console.log(`${util.inspect(part)}`)
-    // })
-    
+    // Get emotes for channel if included in message and missing from cache
+    event.messageParts.filter(part => part.type === 'emote')
+      .filter(part => !Object.hasOwn(emotes, part.emote.id))
+      .map(part => api.chat.getChannelEmotes(part.emote.owner_id))
+      .map(promise => promise.then(channelEmotes => channelEmotes.forEach(emote => emotes[emote.id] = emote)))
+
+    messages.unshift(Object.assign({}, message, {new: Math.ceil(newDuration / refresh)}))
     messages.length = limit
   })
 
@@ -318,7 +436,10 @@ app.get('/channel/:channel', checkAuthentication, async function (req, res) {
     alerts.length = limit
   })
 
-  return res.send(channelTemplate({ channel: current.channel, alerts, messages, refresh: 2 }));
+  //
+  //
+  // return template.
+  return res.send(channelTemplate({ channel: current.channel, alerts, messages, refresh: 2, userId }));
 });
 
 app.listen(3000, function () {
