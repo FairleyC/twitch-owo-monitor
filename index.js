@@ -30,6 +30,8 @@ const TWITCH_CLIENT_ID = process.env.TWITCH_CLIENT_ID;
 const TWITCH_SECRET    = process.env.TWITCH_SECRET;
 const SESSION_SECRET   = process.env.SESSION_SECRET;
 const CALLBACK_URL     = process.env.CALLBACK_URL;  // You can run locally with - http://localhost:3000/auth/twitch/callback
+const PORT             = process.env.PORT || 3000;
+let DEV_MODE         = process.env.DEV_MODE || false;
 
 // Initialize Express and middlewares
 var app = express();
@@ -153,71 +155,196 @@ var channelTemplate = handlebars.compile(`
         <h5 class="max bold">Twitch Monitor</h5>
       </nav>
     </header>
-    <main class="responsive" id="content">
-      <div class="grid">
-        <div class="s6">
-          {{placeholderIfEmpty "messages" messages}}
-          {{#each messages}}
-            {{chatMessage ../userId}}
-          {{/each}}
-        </div>
-        <div class="s6">
-          {{placeholderIfEmpty "alerts" alerts}}
-          {{#each alerts}}
-            <article>
-              <p>{{this.message}}</p>
-            </article>
-          {{/each}}
-        </div>
+    <main class="responsive" id="content" scrollTop="">
+      <div class="grid padding">
+        {{controlBar}}
+        {{chatColumn messages userId}}
+        {{informationColumn}}
+        {{keywordColumn keywords userId}}
       </div>
     </main>
     <script>
-      // Refresh with page scrolled to same position
+      // Refresh page with state.
       const urlParams = new URLSearchParams(window.location.search);
+
+      // Scroll Position
       const y = urlParams.get('y');
       if (y) {
         document.getElementById('content').scrollTop = y;
       }
+
       setTimeout(() => {
-        window.location.href = window.location.origin + window.location.pathname + '?y=' + document.getElementById('content').scrollTop
+        var query = '?y=' + document.getElementById('content').scrollTop + '&chat=' + document.getElementById('chat-checkbox').checked
+        window.history.pushState({}, '', query)
+        window.location.reload()
       }, {{refresh}} * 1000)
+    </script>
+    <script>
+      const chatCheckbox = document.getElementById('chat-checkbox');
+      chatCheckbox.addEventListener('change', function() {
+        if (chatCheckbox.checked) {
+          document.getElementById('chat').style.display = 'block';
+          document.getElementById('information').style.display = 'none';
+        } else {
+          document.getElementById('chat').style.display = 'none';
+          document.getElementById('information').style.display = 'block';
+        }
+      });
     </script>
   </body>
 </html>`);
 
-handlebars.registerHelper('alertMessage', function () {
-  switch (this.type) {
-    default:
-      return this.message
-  }
-});
+const channelTemplateOptions = (channel, userId, queryParams) => { return {channel, alerts, messages, keywords, refresh, userId, queryParams } }
 
-handlebars.registerHelper('chatMessage', function (userId) {
+handlebars.registerHelper('controlBar', function () {
+  let output = `
+    <div class="s2 middle-align left-align">
+      <label class="switch icon">
+        <input type="checkbox" id="chat-checkbox" ${this.queryParams && this.queryParams.chat === 'true' ? 'checked' : ''}>
+        <span>
+          <i>chat</i>
+        </span>
+      </label>
+    </div>
+    <div class="s8"></div>
+    <div class="s2 middle-align right-align">
+      <label class="switch icon">
+        <input type="checkbox">
+        <span>
+          <i>bolt</i>
+        </span>
+      </label>
+    </div>
+  `
+  return new handlebars.SafeString(output);
+})
+
+handlebars.registerHelper('chatColumn', function (messages, userId) {
+  let output = `
+    <div class="s6" id="chat" ${this.queryParams && this.queryParams.chat === 'true' ? '' : 'style="display: none"'}>
+      ${placeholderIfEmpty("messages", messages)}
+      ${messages
+        .map((message) => chatMessage(message, userId))
+        .join('')}
+    </div>
+  `
+  return new handlebars.SafeString(output);
+})
+
+handlebars.registerHelper('informationColumn', function () {
+  let output = `
+    <div class="s6" id="information" ${this.queryParams && this.queryParams.chat === 'true' ? 'style="display: none"' : ''}>
+      <article>
+        <h3>Information Column</h3>
+        <p>This area will hold configuration options along with a list of keywords that can be used to send sensations to OWO.</p>
+        <p>Table Goes Here</p>
+      </article>
+    </div>
+  `
+  return new handlebars.SafeString(output);
+})
+
+handlebars.registerHelper('alertsColumn', function (alerts, userId) {
+  let output = `
+    <div class="s6" id="alerts">
+      ${placeholderIfEmpty("alerts", alerts)}
+      ${alerts
+        .map(alertMessage)
+        .map((child) => `<article><p>${child}</p></article>`)
+        .join('')}
+    </div>
+  `
+  return new handlebars.SafeString(output);
+})
+
+handlebars.registerHelper('keywordColumn', function (keywords, userId) {
+  let output = `
+    <div class="s6" id="keywords">
+      ${placeholderIfEmpty("keywords", keywords)}
+      ${keywords
+        .map(keywordMessage)
+        .join('')}
+    </div>
+  `
+  return new handlebars.SafeString(output);
+})
+
+const placeholderIfEmpty = (type, list) => {
+  if (list.length === 0) {
+    return new handlebars.SafeString(`<article><i class="tiny">${infoSvg}</i> <span>No ${type} to display.</span></article>`);
+  }
+  return '';
+};
+
+const alertMessage = (alert) => {
+  switch (alert.type) {
+    default:
+      return alert.message
+  }
+};
+
+const chatMessage = (message, userId) => {
   let output = '';
-  const badgeString = Object.entries(this.badges)
-    .filter(([id, version]) => Object.hasOwn(badges, id) && Object.hasOwn(badges[id], version))
-    .map(([id, version]) => `<img src="${badges[id][version].getImageUrl(1)}" alt="${badges[id][version].title}" class="square"></image> `)
-    .join('');
-  const content = formatContent(this.messageParts, userId)
-  const message = `<span>${badgeString}</span><span style="color:${this.color}">${this.user}</span>: ${content}`
+  const badgeString = formatBadgeContent(message.badges)
+  const content = formatMessageContent(message.messageParts, userId)
+  const line = `<span>${badgeString}</span><span style="color:${message.color}">${message.user}</span>: ${content}`
 
   let classValue = { color: "", size: "" };
-  if (this.new) {
+  if (message.new) {
     classValue.color = 'surface-bright'
     classValue.size = 'large-text'
   }
 
-  const mentioned = this.messageParts.filter(part => part.type === 'mention').findIndex(part => part.mention.user_id === userId) !== -1
+  const mentioned = message.messageParts.filter(part => part.type === 'mention').findIndex(part => part.mention.user_id === userId) !== -1
   if (mentioned) {
     classValue.color = 'primary-container'
   }
 
-  output = `<article class="${classValue.color} ${classValue.size}">${message}</article>`
+  output = `<article class="${classValue.color} ${classValue.size}">${line}</article>`
 
   return new handlebars.SafeString(output);
-});
+};
 
-function formatContent(messageParts, userId) {
+const keywordMessage = (keyword, userId) => {
+  let output = '';
+  const badgeString = formatBadgeContent(keyword.badges)
+  const content = formatMessageContent(keyword.messageParts, userId)
+
+  let line = `<div class="s12"><span>${badgeString}</span><span style="color:${keyword.color}">${keyword.user}</span>: ${content}</div>`
+  keyword.keywords.forEach(keyword => {
+    const buttons = `
+      <nav class="no-space">
+        <button class="border left-round" disabled>
+          <i>refresh</i>
+        </button>
+        <button class="border right-round">
+          <i>delete</i>
+        </button>
+      </nav>
+    `
+    const description = "Description Goes Here"
+    line += `<hr class="s12"><div class="s3 middle-align center-align"><span style="color: gold">⚡${keyword.number}</span></div><div class="s6 middle-align left-align">${description}</div><div class="s3">${buttons}</div>`
+  })
+
+  let classValue = { color: "", size: "" };
+  if (keyword.new) {
+    classValue.color = 'surface-bright'
+    classValue.size = 'large-text'
+  }
+
+  output = `<article class="${classValue.color} ${classValue.size}"><div class="grid">${line}</div></article>`
+
+  return new handlebars.SafeString(output);
+}
+
+const formatBadgeContent = (chatterBadges) => {
+  return Object.entries(chatterBadges)
+    .filter(([id, version]) => Object.hasOwn(badges, id) && Object.hasOwn(badges[id], version))
+    .map(([id, version]) => `<img src="${badges[id][version].getImageUrl(1)}" alt="${badges[id][version].title}" class="square"></image> `)
+    .join('');
+}
+
+const formatMessageContent = (messageParts, userId) => {
   return messageParts.map(part => {
     switch (part.type) {
       case 'text':
@@ -232,7 +359,7 @@ function formatContent(messageParts, userId) {
           const scale = emote.scales[0]
           const theme = emote.themeModes.slice(-1)[0]
           let src = emote.getFormattedImageUrl(scale, format, theme)
-          return `<img src="${src}" alt="${part.text}" height="28" width="28" class="square"></image>`
+          return `<img src="${src}" alt="${part.text}" width="28" class="square"></image>`
         } else {
           return `<span>${part.text}</span>`
         }
@@ -242,6 +369,8 @@ function formatContent(messageParts, userId) {
           classValue = 'inverse-surface square'
         }
         return `<span class="${classValue}" style="padding: 4px">${part.text}</span>`
+      case 'keyword':
+        return `<span style="color: gold">⚡${part.keyword.number}</span>`
       default:
         return ``
     }
@@ -250,12 +379,6 @@ function formatContent(messageParts, userId) {
 
 const infoSvg = `<svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="#e8eaed"><path d="M440-280h80v-240h-80v240Zm40-320q17 0 28.5-11.5T520-640q0-17-11.5-28.5T480-680q-17 0-28.5 11.5T440-640q0 17 11.5 28.5T480-600Zm0 520q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-83 31.5-156T197-763q54-54 127-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Zm0-80q134 0 227-93t93-227q0-134-93-227t-227-93q-134 0-227 93t-93 227q0 134 93 227t227 93Zm0-320Z"/></svg>`
 
-handlebars.registerHelper('placeholderIfEmpty', function (type, list) {
-  if (list.length === 0) {
-    return new handlebars.SafeString(`<article><i class="tiny">${infoSvg}</i> <span>No ${type} to display.</span></article>`);
-  }
-  return '';
-});
 
 // If user has an authenticated session, display it, otherwise display link to authenticate
 app.get('/', checkAuthentication, async function (req, res) {
@@ -265,6 +388,7 @@ app.get('/', checkAuthentication, async function (req, res) {
 let current = {};
 let alerts = [];
 let messages = [];
+let keywords = [];
 let emotes = {};
 let badges = {};
 let cheermotes = {};
@@ -276,6 +400,7 @@ const newDuration = 15;
 app.get('/channel/:channel', checkAuthentication, async function (req, res) {
   const channel = req.params.channel;
   const userId = req.session.passport.user.data[0].id
+  const queryParams = req.query;
 
   //
   //
@@ -291,8 +416,9 @@ app.get('/channel/:channel', checkAuthentication, async function (req, res) {
   const isRefreshCurrentChannel = current.channel === channel
   if (isRefreshCurrentChannel) {
     // return the web page, all listeners are already started.
-    res.send(channelTemplate({ channel: current.channel, alerts, messages, refresh, userId }));
+    res.send(channelTemplate(channelTemplateOptions(current.channel, userId, queryParams)));
     messages.filter(m => m.new > 0).map(m => m.new--);
+    keywords.filter(m => m.new > 0).map(m => m.new--);
     return;
   }
 
@@ -392,6 +518,7 @@ app.get('/channel/:channel', checkAuthentication, async function (req, res) {
       color: event.color || '#888888',
       badges: event.badges,
       messageParts: event.messageParts,
+      new: Math.ceil(newDuration / refresh),
     }
     if (event.isCheer) {
       alerts.unshift(Object.assign({}, message, {type: 'cheer', bits: event.bits, message: `${event.chatterDisplayName} cheered ${event.bits} bits`}))
@@ -405,13 +532,64 @@ app.get('/channel/:channel', checkAuthentication, async function (req, res) {
       alerts.length = limit
     }
 
+    // Only necessary if keyword is not a bitmote.
+    if (DEV_MODE) {
+      const keywordName = "owo"
+      const keywordPattern = new RegExp(String.raw`\b${keywordName}\d+\b`)
+      if (keywordPattern.test(event.messageText)) {
+        const keywordInstances = [];
+        const reprocessedMessageParts = event.messageParts.reduce((acc, part) => {
+          if (part.type === 'text' && keywordPattern.test(part.text)) {
+            const words = part.text.split(' ')
+
+            let newText = [];
+            let currentText = [];
+            words.forEach(word => {
+              if (keywordPattern.test(word)) {
+                if (currentText.length > 0) {
+                  currentText.push('')
+                  newText.push(currentText.join(' '))
+                }
+                currentText = ['']
+                newText.push(word)
+              } else {
+                currentText.push(word)
+              }
+            });
+            if (currentText.length > 0) {
+              newText.push(currentText.join(' '))
+            }
+
+            const digits = /\d+/
+            newParts = newText.forEach(text => {
+              if (keywordPattern.test(text)) {
+                const [ number ] = text.match(digits)
+                acc.push(Object.assign({}, part, { type: 'keyword', text, keyword: { prefix: keywordName, number }}))
+                keywordInstances.push({ prefix: keywordName, number })
+              } else {
+                acc.push(Object.assign({}, part, { text }))
+              }
+            });
+          } else {
+            acc.push(part)
+          }
+          return acc
+        }, [])
+
+        keywords.unshift(Object.assign({}, message, {type: 'keyword', keywords: keywordInstances, messageParts: reprocessedMessageParts}))
+      }
+    } else {
+      // create keywords from bit messages.
+      // check prefix and number to match the menu before creating keywords.
+    }
+
     // Get emotes for channel if included in message and missing from cache
     event.messageParts.filter(part => part.type === 'emote')
       .filter(part => !Object.hasOwn(emotes, part.emote.id))
       .map(part => api.chat.getChannelEmotes(part.emote.owner_id))
       .map(promise => promise.then(channelEmotes => channelEmotes.forEach(emote => emotes[emote.id] = emote)))
 
-    messages.unshift(Object.assign({}, message, {new: Math.ceil(newDuration / refresh)}))
+    messages.unshift(message)
     messages.length = limit
   })
 
@@ -436,12 +614,25 @@ app.get('/channel/:channel', checkAuthentication, async function (req, res) {
     alerts.length = limit
   })
 
+  
+
   //
   //
   // return template.
-  return res.send(channelTemplate({ channel: current.channel, alerts, messages, refresh: 2, userId }));
+  return res.send(channelTemplate(channelTemplateOptions(current.channel, userId, queryParams)));
 });
 
-app.listen(3000, function () {
-  console.log('Twitch auth sample listening on port 3000!')
+app.listen(PORT, function () {
+  console.log(`Twitch auth sample listening on port ${PORT}!`)
+
+  process.argv.forEach(arg => {
+    switch (arg) {
+      case '-d':
+        console.log(`Dev Mode Enabled`)
+        DEV_MODE = true;
+        break;
+      default:
+        break;
+    }
+  })
 });
