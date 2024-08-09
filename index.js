@@ -39,6 +39,7 @@ app.use(session({secret: SESSION_SECRET, resave: false, saveUninitialized: false
 app.use(express.static('public'));
 app.use(passport.initialize());
 app.use(passport.session());
+app.use(express.json());
 
 // Override passport profile function to get user profile from Twitch API
 OAuth2Strategy.prototype.userProfile = function(accessToken, done) {
@@ -138,6 +139,10 @@ var authTemplate = handlebars.compile(`
     <tr><th>Image</th><td>{{logo}}</td></tr>
 </table></html>`);
 
+var redemptionsTableTemplate = handlebars.compile(`
+    {{> redemptionsTablePartial}}
+  `);
+
 var channelTemplate = handlebars.compile(`
 <html>
   <head>
@@ -155,52 +160,70 @@ var channelTemplate = handlebars.compile(`
         <h5 class="max bold">Twitch Monitor</h5>
       </nav>
     </header>
-    <main class="responsive" id="content" scrollTop="">
+    <main class="responsive" id="content" style="scrollbar-gutter: stable;">
       <div class="grid padding">
         {{controlBar}}
-        {{chatColumn messages userId}}
-        {{informationColumn}}
-        {{keywordColumn keywords userId}}
+        {{> chatStreamPartial}}
+        {{> informationColumn}}
+        {{> keywordsStreamPartial}}
       </div>
     </main>
     <script>
-      // Refresh page with state.
-      const urlParams = new URLSearchParams(window.location.search);
-
-      // Scroll Position
-      const y = urlParams.get('y');
-      if (y) {
-        document.getElementById('content').scrollTop = y;
-      }
-
-      setTimeout(() => {
-        var query = '?y=' + document.getElementById('content').scrollTop + '&chat=' + document.getElementById('chat-checkbox').checked
-        window.history.pushState({}, '', query)
-        window.location.reload()
-      }, {{refresh}} * 1000)
+      document.getElementById('chat').style.display = 'none';
     </script>
     <script>
-      const chatCheckbox = document.getElementById('chat-checkbox');
-      chatCheckbox.addEventListener('change', function() {
-        if (chatCheckbox.checked) {
-          document.getElementById('chat').style.display = 'block';
-          document.getElementById('information').style.display = 'none';
-        } else {
-          document.getElementById('chat').style.display = 'none';
-          document.getElementById('information').style.display = 'block';
+      setInterval(function() {
+        refreshKeywords();
+        if (document.getElementById('chat-checkbox').checked) {
+          refreshChat();
         }
-      });
+      }, {{refresh}} * 1000)
+
+      function refreshKeywords() {
+        fetch('/app/keywords').then(function(response) {
+          if (response.ok) {
+            response.text().then(function(text) {
+              document.getElementById('keywords').outerHTML = text;
+            });
+          } else {
+            console.error(response);
+          }
+        });
+      }
+
+      function refreshChat() {
+        fetch('/app/chat').then(function(response) {
+          if (response.ok) {
+            response.text().then(function(text) {
+              document.getElementById('chat').outerHTML = text;
+              if (!document.getElementById('chat-checkbox').checked) {
+                document.getElementById('chat').style.display = 'none';
+              }
+            });
+          } else {
+            console.error(response);
+          }
+        });
+      }
     </script>
   </body>
 </html>`);
 
-const channelTemplateOptions = (channel, userId, queryParams) => { return {channel, alerts, messages, keywords, refresh, userId, queryParams } }
+const channelTemplateOptions = (channel, userId) => { return {channel, messages, keywords, refresh, userId, redemptions } }
+
+var keywordsStreamTemplate = handlebars.compile(`
+  {{> keywordsStreamPartial}}
+`);
+
+var chatStreamTemplate = handlebars.compile(`
+  {{> chatStreamPartial}}
+`);
 
 handlebars.registerHelper('controlBar', function () {
   let output = `
     <div class="s2 middle-align left-align">
       <label class="switch icon">
-        <input type="checkbox" id="chat-checkbox" ${this.queryParams && this.queryParams.chat === 'true' ? 'checked' : ''}>
+        <input type="checkbox" id="chat-checkbox">
         <span>
           <i>chat</i>
         </span>
@@ -215,97 +238,179 @@ handlebars.registerHelper('controlBar', function () {
         </span>
       </label>
     </div>
+    <script>
+      const chatCheckbox = document.getElementById('chat-checkbox');
+      chatCheckbox.addEventListener('change', function() {
+        if (chatCheckbox.checked) {
+          refreshChat();
+          document.getElementById('chat').style.display = 'block';
+          document.getElementById('information').style.display = 'none';
+        } else {
+          document.getElementById('chat').style.display = 'none';
+          document.getElementById('information').style.display = 'block';
+        }
+      });
+    </script>
   `
   return new handlebars.SafeString(output);
 })
 
-handlebars.registerHelper('chatColumn', function (messages, userId) {
-  let output = `
-    <div class="s6" id="chat" ${this.queryParams && this.queryParams.chat === 'true' ? '' : 'style="display: none"'}>
-      ${placeholderIfEmpty("messages", messages)}
-      ${messages
-        .map((message) => chatMessage(message, userId))
-        .join('')}
-    </div>
-  `
-  return new handlebars.SafeString(output);
-})
+handlebars.registerPartial('chatStreamPartial', `
+  <div class="s6" id="chat">
+    {{ placeholderIfEmpty "messages" messages }}
+    {{#each messages}}
+      {{chatMessage this userId}}
+    {{/each}}
+  </div>
+`);
 
-handlebars.registerHelper('informationColumn', function () {
-  let output = `
-    <div class="s6" id="information" ${this.queryParams && this.queryParams.chat === 'true' ? 'style="display: none"' : ''}>
+handlebars.registerPartial('informationColumn', `
+    <div class="s6" id="information">
       <article>
-        <h3>Information Column</h3>
-        <p>This area will hold configuration options along with a list of keywords that can be used to send sensations to OWO.</p>
-        <p>Table Goes Here</p>
+        <h3>Redemptions</h3>
+        <div id="redemptions-table">
+          {{> redemptionsTablePartial}}
+        </div>
+        <fieldset>
+          <legend>New Redemption</legend>
+          <div class="row">
+            <div class="max">
+              <div class="field label">
+                <input type="text" name="prefix" id="new-sensation-prefix">
+                <label>Prefix</label>
+              </div>
+            </div>
+            <div class="max">
+              <div class="field label">
+                <input type="number" name="cost" id="new-sensation-cost">
+                <label>Cost</label>
+              </div>
+            </div>
+          </div>
+          <div class="row">
+            <div class="max">
+              <div class="field label">
+                <input type="text" name="description" id="new-sensation-description">
+                <label>Description</label>
+              </div>
+            </div>
+          </div>
+          <div class="row">
+            <div class="max">
+              <div class="field textarea border label">
+                <textarea name="sensation" id="new-sensation-code"></textarea>
+                <label>Sensation</label>
+              </div>
+            </div>
+          </div>
+          <div class="row right-align">
+            <nav class="no-space">
+              <button class="transparent square" onclick="addRedemption()">
+                <i>save</i>
+              </button>
+              <button class="transparent square" onclick="clearRedemptionForm()">
+                <i>cancel</i>
+              </button>
+            </nav>
+          </div>
+        </fieldset>
       </article>
-    </div>
-  `
-  return new handlebars.SafeString(output);
-})
+      <script>
+        function addRedemption() {
+          const prefix = document.getElementById('new-sensation-prefix').value;
+          const cost = document.getElementById('new-sensation-cost').value;
+          const description = document.getElementById('new-sensation-description').value;
+          const sensation = document.getElementById('new-sensation-code').value;
 
-handlebars.registerHelper('alertsColumn', function (alerts, userId) {
-  let output = `
-    <div class="s6" id="alerts">
-      ${placeholderIfEmpty("alerts", alerts)}
-      ${alerts
-        .map(alertMessage)
-        .map((child) => `<article><p>${child}</p></article>`)
-        .join('')}
-    </div>
-  `
-  return new handlebars.SafeString(output);
-})
+          const redemption = {
+            prefix,
+            cost,
+            description,
+            sensation
+          }
 
-handlebars.registerHelper('keywordColumn', function (keywords, userId) {
-  let output = `
-    <div class="s6" id="keywords">
-      ${placeholderIfEmpty("keywords", keywords)}
-      ${keywords
-        .map(keywordMessage)
-        .join('')}
-    </div>
-  `
-  return new handlebars.SafeString(output);
-})
+          fetch('/redemption', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(redemption)
+          }).then(function(response) {
+            if (response.ok) {
+              response.text().then(function(text) {
+                document.getElementById('redemptions-table').innerHTML = text;
+                clearRedemptionForm();
+              });
+            } else {
+              console.error(response);
+            }
+          });
+        }
 
-const placeholderIfEmpty = (type, list) => {
+        function clearRedemptionForm() {
+          document.getElementById('new-sensation-prefix').value = '';
+          document.getElementById('new-sensation-cost').value = '';
+          document.getElementById('new-sensation-description').value = '';
+          document.getElementById('new-sensation-code').value = '';
+        }
+
+        function deleteRedemption(uuid) {
+          fetch('/redemption/' + uuid, {
+            method: 'DELETE',
+            headers: {
+              'Content-Type': 'application/json'
+            }
+          }).then(function(response) {
+            if (response.ok) {
+              response.text().then(function(text) {
+                document.getElementById('redemptions-table').innerHTML = text;
+              });
+            } else {
+              console.error(response);
+            }
+          });
+        }
+      </script>
+    </div>
+`)
+
+handlebars.registerPartial('keywordsStreamPartial', `
+  <div class="s6" id="keywords">
+    {{ placeholderIfEmpty "keywords" keywords }}
+    {{#each keywords}}
+      {{keywordMessage this userId}}
+    {{/each}}
+  </div> 
+`);
+
+handlebars.registerPartial('redemptionsTablePartial', `
+    <hr>
+    <div class="grid middle-align padding"> 
+      <span class="s2 bold">Prefix</span>
+      <span class="s2 bold">Cost</span>
+      <span class="s8 bold">Description</span>
+      
+      {{#each redemptions.list}}
+        <span class="s2">{{this.prefix}}</span>
+        <span class="s2">{{this.cost}}</span>
+        <span class="s6">{{this.description}}</span>
+        <div class="s2 right-align">
+          <button class="transparent square" onclick="deleteRedemption('{{this.uuid}}')">
+            <i>delete</i>
+          </button>
+        </div>
+      {{/each}}
+    </div>
+`);
+
+handlebars.registerHelper('placeholderIfEmpty', function (type, list) {
   if (list.length === 0) {
     return new handlebars.SafeString(`<article><i class="tiny">${infoSvg}</i> <span>No ${type} to display.</span></article>`);
   }
   return '';
-};
+});
 
-const alertMessage = (alert) => {
-  switch (alert.type) {
-    default:
-      return alert.message
-  }
-};
-
-const chatMessage = (message, userId) => {
-  let output = '';
-  const badgeString = formatBadgeContent(message.badges)
-  const content = formatMessageContent(message.messageParts, userId)
-  const line = `<span>${badgeString}</span><span style="color:${message.color}">${message.user}</span>: ${content}`
-
-  let classValue = { color: "", size: "" };
-  if (message.new) {
-    classValue.color = 'surface-bright'
-    classValue.size = 'large-text'
-  }
-
-  const mentioned = message.messageParts.filter(part => part.type === 'mention').findIndex(part => part.mention.user_id === userId) !== -1
-  if (mentioned) {
-    classValue.color = 'primary-container'
-  }
-
-  output = `<article class="${classValue.color} ${classValue.size}">${line}</article>`
-
-  return new handlebars.SafeString(output);
-};
-
-const keywordMessage = (keyword, userId) => {
+handlebars.registerHelper('keywordMessage', function (keyword, userId) {
   let output = '';
   const badgeString = formatBadgeContent(keyword.badges)
   const content = formatMessageContent(keyword.messageParts, userId)
@@ -335,7 +440,29 @@ const keywordMessage = (keyword, userId) => {
   output = `<article class="${classValue.color} ${classValue.size}"><div class="grid">${line}</div></article>`
 
   return new handlebars.SafeString(output);
-}
+});
+
+handlebars.registerHelper('chatMessage', function (message, userId) {
+  let output = '';
+  const badgeString = formatBadgeContent(message.badges)
+  const content = formatMessageContent(message.messageParts, userId)
+  const line = `<span>${badgeString}</span><span style="color:${message.color}">${message.user}</span>: ${content}`
+
+  let classValue = { color: "", size: "" };
+  if (message.new) {
+    classValue.color = 'surface-bright'
+    classValue.size = 'large-text'
+  }
+
+  const mentioned = message.messageParts.filter(part => part.type === 'mention').findIndex(part => part.mention.user_id === userId) !== -1
+  if (mentioned) {
+    classValue.color = 'primary-container'
+  }
+
+  output = `<article class="${classValue.color} ${classValue.size}">${line}</article>`
+
+  return new handlebars.SafeString(output);
+});
 
 const formatBadgeContent = (chatterBadges) => {
   return Object.entries(chatterBadges)
@@ -379,28 +506,137 @@ const formatMessageContent = (messageParts, userId) => {
 
 const infoSvg = `<svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="#e8eaed"><path d="M440-280h80v-240h-80v240Zm40-320q17 0 28.5-11.5T520-640q0-17-11.5-28.5T480-680q-17 0-28.5 11.5T440-640q0 17 11.5 28.5T480-600Zm0 520q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-83 31.5-156T197-763q54-54 127-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Zm0-80q134 0 227-93t93-227q0-134-93-227t-227-93q-134 0-227 93t-93 227q0 134 93 227t227 93Zm0-320Z"/></svg>`
 
-
-// If user has an authenticated session, display it, otherwise display link to authenticate
-app.get('/', checkAuthentication, async function (req, res) {
-  res.send(authTemplate(req.session.passport.user));
-});
-
+//
+//
+// Application State
 let current = {};
-let alerts = [];
 let messages = [];
 let keywords = [];
 let emotes = {};
 let badges = {};
 let cheermotes = {};
+let redemptions = {}
 const limit = 25;
 const refresh = 5;
 const newDuration = 15;
 
+//
+//
+// Redemption Management
+const parseRedemptionsFromFile = (filename) => {
+  const data = fs.readFileSync(filename, 'utf8');
+  redemptions = JSON.parse(data);
+}
+
+const parseRedemptionsFromStaticCode = () => {
+  staticRedemptions = [
+    { uuid: crypto.randomUUID(), description: "10 Description", cost: 10, prefix: "cheer" },
+    { uuid: crypto.randomUUID(), description: "20 Description", cost: 20, prefix: "cheer" },
+    { uuid: crypto.randomUUID(), description: "30 Description", cost: 30, prefix: "cheer" },
+  ]
+  
+  redemptions = createRedemptionMaps(staticRedemptions);
+}
+
+const createRedemptionMaps = (list) => {
+  const cheermoteMap = list.reduce((acc, redemption, index) => {
+    acc[redemption.prefix + redemption.cost] = Object.assign({ index }, redemption);
+    return acc;
+  }, {});
+
+  const idMap = list.reduce((acc, redemption, index) => {
+    acc[redemption.uuid] = Object.assign({ index }, redemption);
+    return acc;
+  }, {});
+
+  return {
+    cheermoteMap,
+    idMap,
+    list
+  }
+}
+
+const removeRedemption = (uuid) => {
+  const redemptionIndex = redemptions.idMap[uuid].index
+  const newList = redemptions.list.toSpliced(redemptionIndex, 1)
+  redemptions = createRedemptionMaps(newList)
+}
+
+app.get('/', checkAuthentication, async function (req, res) {
+  res.send(authTemplate(req.session.passport.user));
+});
+
+app.get('/app/keywords', checkAuthentication, async function (req, res) {
+  const userId = req.session.passport.user.data[0].id
+  res.send(keywordsStreamTemplate({ keywords, userId}))
+});
+
+app.get('/app/chat', checkAuthentication, async function (req, res) {
+  const userId = req.session.passport.user.data[0].id
+  res.send(chatStreamTemplate({ messages, userId}))
+});
+
+app.delete('/redemption/:uuid', checkAuthentication, async function (req, res) {
+  const uuid = req.params.uuid
+  if (!Object.hasOwn(redemptions.idMap, uuid)) {
+    return res.status(404).send('Redemption not found');
+  }
+  removeRedemption(uuid)
+  res.status(200).send(redemptionsTableTemplate({ redemptions }))
+});
+
+app.post('/redemption', checkAuthentication, async function (req, res) {
+  const { prefix, cost, description, sensation } = req.body
+  // need to validate fields.
+  //   prefix needs to be a valid cheermote prefix
+  //   cost needs to be a number
+  //   description needs to be a string
+  //   sensation needs to be a valid sensation *cry*
+
+  const newRedemption = { 
+    uuid: crypto.randomUUID(),
+    prefix,
+    cost,
+    description,
+    sensation
+  }
+
+  const newList = [...redemptions.list, newRedemption]
+  redemptions = createRedemptionMaps(newList)
+  res.status(200).send(redemptionsTableTemplate({ redemptions }))
+});
+
+app.get('/api/keywords', checkAuthentication, async function (req, res) {
+  res.send(keywords);
+});
+
+app.get('/api/redemptions', checkAuthentication, async function (req, res) {
+  res.send(redemptions);
+});
+
+app.get('/api/messages', checkAuthentication, async function (req, res) {
+  res.send(messages);
+});
+
+app.get('/api/emotes', checkAuthentication, async function (req, res) {
+  res.send(emotes);
+});
+
+app.get('/api/badges', checkAuthentication, async function (req, res) {
+  res.send(badges);
+});
+
+app.get('/api/cheermotes', checkAuthentication, async function (req, res) {
+  res.send(cheermotes);
+});
+
+app.get('/api/channel', checkAuthentication, async function (req, res) {
+  res.send(current);
+});
 
 app.get('/channel/:channel', checkAuthentication, async function (req, res) {
   const channel = req.params.channel;
   const userId = req.session.passport.user.data[0].id
-  const queryParams = req.query;
 
   //
   //
@@ -416,7 +652,7 @@ app.get('/channel/:channel', checkAuthentication, async function (req, res) {
   const isRefreshCurrentChannel = current.channel === channel
   if (isRefreshCurrentChannel) {
     // return the web page, all listeners are already started.
-    res.send(channelTemplate(channelTemplateOptions(current.channel, userId, queryParams)));
+    res.send(channelTemplate(channelTemplateOptions(current.channel, userId)));
     messages.filter(m => m.new > 0).map(m => m.new--);
     keywords.filter(m => m.new > 0).map(m => m.new--);
     return;
@@ -431,7 +667,7 @@ app.get('/channel/:channel', checkAuthentication, async function (req, res) {
     current.listener.stop();
     current = {};
     messages = [];
-    alerts = [];
+    keywords = [];
     badges = {};
   }
 
@@ -520,19 +756,10 @@ app.get('/channel/:channel', checkAuthentication, async function (req, res) {
       messageParts: event.messageParts,
       new: Math.ceil(newDuration / refresh),
     }
-    if (event.isCheer) {
-      alerts.unshift(Object.assign({}, message, {type: 'cheer', bits: event.bits, message: `${event.chatterDisplayName} cheered ${event.bits} bits`}))
-      alerts.length = limit
-    } 
-    if (event.isRedemption) {
-      // error found here: {"error":"Unauthorized","status":401,"message":"The ID in broadcaster_id must match the user ID found in the request's OAuth token."}
-      // const reward = await api.channelPoints.getCustomRewardById(broadcaster.id, event.rewardId)
-      // The authorized user must be the broadcaster to get channel point redemptions
-      alerts.unshift(Object.assign({}, message, {type: 'redemption', reward: event.rewardId, message: `${event.chatterDisplayName} redeemed ${event.rewardTitle} - ${event.rewardPrompt} for ${event.rewardCost} points`}))
-      alerts.length = limit
-    }
 
-    // Only necessary if keyword is not a bitmote.
+    //
+    //
+    // Identify keyword instances.
     if (DEV_MODE) {
       const keywordName = "owo"
       const keywordPattern = new RegExp(String.raw`\b${keywordName}\d+\b`)
@@ -579,10 +806,17 @@ app.get('/channel/:channel', checkAuthentication, async function (req, res) {
         keywords.unshift(Object.assign({}, message, {type: 'keyword', keywords: keywordInstances, messageParts: reprocessedMessageParts}))
       }
     } else {
-      // create keywords from bit messages.
-      // check prefix and number to match the menu before creating keywords.
+      if (event.isCheer) {
+        const keywordInstances = event.messageParts
+          .filter(part => part.type === 'cheermote')
+          .map(part => ({ prefix: part.cheermote.prefix, number: part.cheermote.bits }))
+
+        keywords.unshift(Object.assign({}, message, {type: 'keyword', keywords: keywordInstances, messageParts: event.messageParts}))
+      }
     }
 
+    //
+    //
     // Get emotes for channel if included in message and missing from cache
     event.messageParts.filter(part => part.type === 'emote')
       .filter(part => !Object.hasOwn(emotes, part.emote.id))
@@ -593,37 +827,16 @@ app.get('/channel/:channel', checkAuthentication, async function (req, res) {
     messages.length = limit
   })
 
-  listener.onChannelChatNotification(broadcaster.id, userId, event => {
-    switch (event.type) {
-      case 'community_sub_gift':
-        alerts.unshift({type: 'community_sub_gift', user: event.chatterDisplayName, amount: event.amount, cumulativeAmount: event.cumulativeAmount, message: `${event.chatterDisplayName} gifted ${event.amount}, they have gifted ${event.cumulativeAmount} to the channel`})
-        break;
-      case 'announcement':
-        alerts.unshift({type: 'announcement', user: event.chatterDisplayName, message: event.messageText})
-        break;
-      case 'raid':
-        alerts.unshift({type: 'raid', user: event.raiderDisplayName, viewerCount: event.viewerCount, message: event.messageText})
-        break;
-      case 'sub_gift':
-        alerts.unshift({type: 'sub_gift', user: event.chatterDisplayName, recipient: event.recipientDisplayName, duration: event.durationMonths, message: `${event.chatterDisplayName} gifted a subscription to ${event.recipientDisplayName} for ${event.durationMonths} months`})
-        break;
-      default:
-        alerts.unshift({type: 'unknown', user: event.chatterDisplayName, message: `Unhandled notification type: ${event.type}`})
-        break;
-    }
-    alerts.length = limit
-  })
-
-  
-
   //
   //
   // return template.
-  return res.send(channelTemplate(channelTemplateOptions(current.channel, userId, queryParams)));
+  return res.send(channelTemplate(channelTemplateOptions(current.channel, userId)));
 });
 
 app.listen(PORT, function () {
   console.log(`Twitch auth sample listening on port ${PORT}!`)
+
+  parseRedemptionsFromStaticCode();
 
   process.argv.forEach(arg => {
     switch (arg) {
@@ -635,4 +848,6 @@ app.listen(PORT, function () {
         break;
     }
   })
+
+  
 });
