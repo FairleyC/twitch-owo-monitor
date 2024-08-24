@@ -8,3 +8,15 @@
 1. Create a file for storing redemptions
 1. Limit keywords to those that are configured
 1. Fix bug with replied mentions not highlighting
+1. Dev mode indicator, toolbar, and log output in the UI
+1. Child process doesn't close on exit
+
+---
+
+Identified when merging code:
+- Nothing identifies if the keyword matches a redemption
+- First implementation will just immediately trigger the redemption
+- Need to build a queue of redemptions to trigger
+- Need a OwoApp launch mechanism with the list of possible redemptions
+- Need test endpoint only available during dev mode, maybe this is a button that only loads when dev mode is enabled?
+

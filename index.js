@@ -23,6 +23,10 @@ const { StaticAuthProvider } = require('@twurple/auth');
 const { ApiClient } = require('@twurple/api');
 const { EventSubWsListener} = require('@twurple/eventsub-ws');
 
+const { createServer } = require('http');
+const { spawn } = require('child_process');
+const { Server } = require('socket.io');
+
 dotenvx.config();
 
 // Define our constants, you will change these with your own
@@ -41,8 +45,14 @@ app.use(passport.initialize());
 app.use(passport.session());
 app.use(express.json());
 
-// Override passport profile function to get user profile from Twitch API
+var server = createServer(app);
+var io = new Server(server);
+
+//
+//
+// Authentication Support
 OAuth2Strategy.prototype.userProfile = function(accessToken, done) {
+  // Override passport profile function to get user profile from Twitch API
   var options = {
     url: 'https://api.twitch.tv/helix/users',
     method: 'GET',
@@ -122,94 +132,95 @@ const connectToTwitch = async (accessToken) => {
   }
 }
 
-// Set route to start OAuth link, this is where you define scopes to request
-app.get('/auth/twitch', includeRedirectInState);
-
-// Set route for OAuth redirect
-app.get('/auth/twitch/callback', redirectAfterAuthentication);
-
-// Define a simple template to safely generate HTML with values from user's profile
+//
+//
+// Webpage HTML Templates
 var authTemplate = handlebars.compile(`
-<html><head><title>Twitch Auth Sample</title></head>
-<table>
-    <tr><th>Access Token</th><td>{{accessToken}}</td></tr>
-    <tr><th>Refresh Token</th><td>{{refreshToken}}</td></tr>
-    <tr><th>Display Name</th><td>{{display_name}}</td></tr>
-    <tr><th>Bio</th><td>{{bio}}</td></tr>
-    <tr><th>Image</th><td>{{logo}}</td></tr>
-</table></html>`);
+  <html><head><title>Twitch Auth Sample</title></head>
+  <table>
+      <tr><th>Access Token</th><td>{{accessToken}}</td></tr>
+      <tr><th>Refresh Token</th><td>{{refreshToken}}</td></tr>
+      <tr><th>Display Name</th><td>{{display_name}}</td></tr>
+      <tr><th>Bio</th><td>{{bio}}</td></tr>
+      <tr><th>Image</th><td>{{logo}}</td></tr>
+  </table></html>
+`);
 
 var redemptionsTableTemplate = handlebars.compile(`
     {{> redemptionsTablePartial}}
-  `);
+`);
 
 var channelTemplate = handlebars.compile(`
-<html>
-  <head>
-    <link href="https://cdn.jsdelivr.net/npm/beercss@3.6.12/dist/cdn/beer.min.css" rel="stylesheet">
-    <script type="module" src="https://cdn.jsdelivr.net/npm/beercss@3.6.12/dist/cdn/beer.min.js"></script>
-    <script type="module" src="https://cdn.jsdelivr.net/npm/material-dynamic-colors@1.1.2/dist/cdn/material-dynamic-colors.min.js"></script>
-    <title>Channel Feed: {{channel}}</title>
-  </head>
-  <body class="dark">
-    <header class="primary">
-      <nav>
-        <a href="https://www.twitch.tv/{{channel}}" target="_blank">
-          <img src="https://cdn.icon-icons.com/icons2/3042/PNG/512/twitch_logo_icon_189276.png" width="64" height="64" alt="Twitch Logo" />
-        </a>
-        <h5 class="max bold">Twitch Monitor</h5>
-      </nav>
-    </header>
-    <main class="responsive" id="content" style="scrollbar-gutter: stable;">
-      <div class="grid padding">
-        {{controlBar}}
-        {{> chatStreamPartial}}
-        {{> informationColumn}}
-        {{> keywordsStreamPartial}}
-      </div>
-    </main>
-    <script>
-      document.getElementById('chat').style.display = 'none';
-    </script>
-    <script>
-      setInterval(function() {
-        refreshKeywords();
-        if (document.getElementById('chat-checkbox').checked) {
-          refreshChat();
+  <html>
+    <head>
+      <link href="https://cdn.jsdelivr.net/npm/beercss@3.6.12/dist/cdn/beer.min.css" rel="stylesheet">
+      <script type="module" src="https://cdn.jsdelivr.net/npm/beercss@3.6.12/dist/cdn/beer.min.js"></script>
+      <script type="module" src="https://cdn.jsdelivr.net/npm/material-dynamic-colors@1.1.2/dist/cdn/material-dynamic-colors.min.js"></script>
+      <title>Channel Feed: {{channel}}</title>
+    </head>
+    <body class="dark">
+      <header class="primary">
+        <nav>
+          <a href="https://www.twitch.tv/{{channel}}" target="_blank">
+            <img src="https://cdn.icon-icons.com/icons2/3042/PNG/512/twitch_logo_icon_189276.png" width="64" height="64" alt="Twitch Logo" />
+          </a>
+          <h5 class="max bold">Twitch Monitor</h5>
+          {{#if options.devMode}}
+            {{> developmentToolbar}}
+          {{/if}}
+        </nav>
+      </header>
+      <main class="responsive" id="content" style="scrollbar-gutter: stable;">
+        <div class="grid padding">
+          {{controlBar}}
+          {{> chatStreamPartial}}
+          {{> informationColumn}}
+          {{> keywordsStreamPartial}}
+        </div>
+      </main>
+      <script>
+        document.getElementById('chat').style.display = 'none';
+      </script>
+      <script>
+        setInterval(function() {
+          refreshKeywords();
+          if (document.getElementById('chat-checkbox').checked) {
+            refreshChat();
+          }
+        }, {{refresh}} * 1000)
+
+        function refreshKeywords() {
+          fetch('/app/keywords').then(function(response) {
+            if (response.ok) {
+              response.text().then(function(text) {
+                document.getElementById('keywords').outerHTML = text;
+              });
+            } else {
+              console.error(response);
+            }
+          });
         }
-      }, {{refresh}} * 1000)
 
-      function refreshKeywords() {
-        fetch('/app/keywords').then(function(response) {
-          if (response.ok) {
-            response.text().then(function(text) {
-              document.getElementById('keywords').outerHTML = text;
-            });
-          } else {
-            console.error(response);
-          }
-        });
-      }
+        function refreshChat() {
+          fetch('/app/chat').then(function(response) {
+            if (response.ok) {
+              response.text().then(function(text) {
+                document.getElementById('chat').outerHTML = text;
+                if (!document.getElementById('chat-checkbox').checked) {
+                  document.getElementById('chat').style.display = 'none';
+                }
+              });
+            } else {
+              console.error(response);
+            }
+          });
+        }
+      </script>
+    </body>
+  </html>
+`);
 
-      function refreshChat() {
-        fetch('/app/chat').then(function(response) {
-          if (response.ok) {
-            response.text().then(function(text) {
-              document.getElementById('chat').outerHTML = text;
-              if (!document.getElementById('chat-checkbox').checked) {
-                document.getElementById('chat').style.display = 'none';
-              }
-            });
-          } else {
-            console.error(response);
-          }
-        });
-      }
-    </script>
-  </body>
-</html>`);
-
-const channelTemplateOptions = (channel, userId) => { return {channel, messages, keywords, refresh, userId, redemptions } }
+const channelTemplateOptions = (channel, userId) => { return { channel, messages, keywords, refresh, userId, redemptions, options: { devMode: DEV_MODE } } }
 
 var keywordsStreamTemplate = handlebars.compile(`
   {{> keywordsStreamPartial}}
@@ -264,6 +275,7 @@ handlebars.registerPartial('chatStreamPartial', `
   </div>
 `);
 
+// rename to reflect redemptions?
 handlebars.registerPartial('informationColumn', `
     <div class="s6" id="information">
       <article>
@@ -305,10 +317,10 @@ handlebars.registerPartial('informationColumn', `
           </div>
           <div class="row right-align">
             <nav class="no-space">
-              <button class="transparent square" onclick="addRedemption()">
+              <button class="transparent circle" onclick="addRedemption()">
                 <i>save</i>
               </button>
-              <button class="transparent square" onclick="clearRedemptionForm()">
+              <button class="transparent circle" onclick="clearRedemptionForm()">
                 <i>cancel</i>
               </button>
             </nav>
@@ -395,12 +407,30 @@ handlebars.registerPartial('redemptionsTablePartial', `
         <span class="s2">{{this.cost}}</span>
         <span class="s6">{{this.description}}</span>
         <div class="s2 right-align">
-          <button class="transparent square" onclick="deleteRedemption('{{this.uuid}}')">
+          <button class="transparent circle" onclick="deleteRedemption('{{this.uuid}}')">
             <i>delete</i>
           </button>
         </div>
       {{/each}}
     </div>
+`);
+
+handlebars.registerPartial('developmentToolbar', `
+  <div>
+    <span class="bold">Development Controls:</span>
+    <button class="border small-round primary" onclick="setTestSignal()"><p class="large-text">Test</p></button>
+    <script>
+      function setTestSignal() {
+        fetch('/api/test', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: ""
+        });
+      }
+    </script>
+  </div>
 `);
 
 handlebars.registerHelper('placeholderIfEmpty', function (type, list) {
@@ -562,9 +592,18 @@ const removeRedemption = (uuid) => {
   redemptions = createRedemptionMaps(newList)
 }
 
+//
+//
+// Application Endpoints
 app.get('/', checkAuthentication, async function (req, res) {
   res.send(authTemplate(req.session.passport.user));
 });
+
+// Set route to start OAuth link, this is where you define scopes to request
+app.get('/auth/twitch', includeRedirectInState);
+
+// Set route for OAuth redirect
+app.get('/auth/twitch/callback', redirectAfterAuthentication);
 
 app.get('/app/keywords', checkAuthentication, async function (req, res) {
   const userId = req.session.passport.user.data[0].id
@@ -576,6 +615,7 @@ app.get('/app/chat', checkAuthentication, async function (req, res) {
   res.send(chatStreamTemplate({ messages, userId}))
 });
 
+// TODO: check if the path needs 'app' prefix
 app.delete('/redemption/:uuid', checkAuthentication, async function (req, res) {
   const uuid = req.params.uuid
   if (!Object.hasOwn(redemptions.idMap, uuid)) {
@@ -585,6 +625,7 @@ app.delete('/redemption/:uuid', checkAuthentication, async function (req, res) {
   res.status(200).send(redemptionsTableTemplate({ redemptions }))
 });
 
+// TODO: check if the path needs 'app' prefix
 app.post('/redemption', checkAuthentication, async function (req, res) {
   const { prefix, cost, description, sensation } = req.body
   // need to validate fields.
@@ -632,6 +673,14 @@ app.get('/api/cheermotes', checkAuthentication, async function (req, res) {
 
 app.get('/api/channel', checkAuthentication, async function (req, res) {
   res.send(current);
+});
+
+app.post('/api/test', checkAuthentication, async function (req, res) {
+  if (!DEV_MODE) {
+    return res.status(400).send('Test is only available in development mode');
+  }
+  io.emit('test', 'Test Triggered');
+  res.send('Test Triggered');
 });
 
 app.get('/channel/:channel', checkAuthentication, async function (req, res) {
@@ -684,6 +733,11 @@ app.get('/channel/:channel', checkAuthentication, async function (req, res) {
     // return 404, the channel was not found
     return res.status(404).send(`Channel ${channel} not found`);
   }
+
+  //
+  //
+  // Launch Owo Application and Establish Connection
+  run_script('OwoApp.exe', [], (output, code) => { console.log("[Child Process (OwoApp.exe)] Exited with status:", code) })
   
   //
   //
@@ -833,7 +887,61 @@ app.get('/channel/:channel', checkAuthentication, async function (req, res) {
   return res.send(channelTemplate(channelTemplateOptions(current.channel, userId)));
 });
 
-app.listen(PORT, function () {
+//
+//
+// Socket IO Configuration
+io.on("connection", (socket) => {
+  console.log(`[Socket] Client Connected: ${socket.id}`)
+  socket.on('disconnect', () => {
+      console.log(`[Socket] Client Disconnected: ${socket.id}`)
+  })
+})
+
+//
+//
+// Process Management
+const cleanup = () => {
+  // TODO: sent kill command to socket io
+  io.emit('stop', 'Monitor Stopping, Cleanup in Progress');
+}
+
+process.on('SIGINT', () => {
+    cleanup();
+    process.exit(0);
+})
+
+//
+//
+// Child Process Support
+function run_script(command, args, callback) {
+  const child = spawn(command, args)
+
+  let scriptOutput = ""
+
+  child.stdout.setEncoding('utf8')
+  child.stdout.on('data', function (data) {
+      console.log(`[Child Process (${command}, stdout)] ${data.toString().trim()}`)
+      data = data.toString()
+      scriptOutput += data
+  })
+
+  child.stderr.setEncoding('utf8')
+  child.stderr.on('data', function (data) {
+      data = data.toString()
+      scriptOutput += data
+  })
+
+  child.on('close', function (code) {
+      callback(scriptOutput, code)
+  })
+
+  return child
+}
+
+//
+//
+// Application Startup
+server.listen(PORT, function () {
   console.log(`Twitch auth sample listening on port ${PORT}!`)
 
   parseRedemptionsFromStaticCode();
@@ -848,6 +956,4 @@ app.listen(PORT, function () {
         break;
     }
   })
-
-  
 });
