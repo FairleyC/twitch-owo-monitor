@@ -22,10 +22,11 @@ var dotenvx        = require('@dotenvx/dotenvx');
 const { StaticAuthProvider } = require('@twurple/auth');
 const { ApiClient } = require('@twurple/api');
 const { EventSubWsListener} = require('@twurple/eventsub-ws');
-
 const { createServer } = require('http');
 const { spawn } = require('child_process');
 const { Server } = require('socket.io');
+const { randomUUID } = require('crypto');
+const { ToadScheduler, SimpleIntervalJob, Task } = require('toad-scheduler');
 
 dotenvx.config();
 
@@ -216,11 +217,47 @@ var channelTemplate = handlebars.compile(`
           });
         }
       </script>
+      <script>
+        function replayKeyword(uuid) {
+          fetch('/app/keywords/' + uuid, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ replay: uuid})
+          }).then(function(response) {
+            if (response.ok) {
+              response.text().then(function(text) {
+                document.getElementById('keywords').innerHTML = text;
+              });
+            } else {
+              console.error(response);
+            }
+          });
+        }
+        function cancelKeyword(uuid) {
+          fetch('/app/keywords/' + uuid, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ cancel: uuid})
+          }).then(function(response) {
+            if (response.ok) {
+              response.text().then(function(text) {
+                document.getElementById('keywords').innerHTML = text;
+              });
+            } else {
+              console.error(response);
+            }
+          });
+        }
+      </script>
     </body>
   </html>
 `);
 
-const channelTemplateOptions = (channel, userId) => { return { channel, messages, keywords, refresh, userId, redemptions, options: { devMode: DEV_MODE } } }
+const channelTemplateOptions = (channel, userId) => { return { channel, messages, keywords, refresh, userId, redemptions, queue: queueCanProcess, options: { devMode: DEV_MODE } } }
 
 var keywordsStreamTemplate = handlebars.compile(`
   {{> keywordsStreamPartial}}
@@ -243,7 +280,7 @@ handlebars.registerHelper('controlBar', function () {
     <div class="s8"></div>
     <div class="s2 middle-align right-align">
       <label class="switch icon">
-        <input type="checkbox">
+        <input type="checkbox" checked="${this.queue}" id="queue-checkbox">
         <span>
           <i>bolt</i>
         </span>
@@ -261,6 +298,36 @@ handlebars.registerHelper('controlBar', function () {
           document.getElementById('information').style.display = 'block';
         }
       });
+      const queueCheckbox = document.getElementById('queue-checkbox');
+      queueCheckbox.addEventListener('change', function() {
+        if (queueCheckbox.checked) {
+          fetch('/api/queue', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ queue: 'on' })
+          }).then(function(response) {
+            if (!response.ok) {
+              queueCheckbox.checked = false;
+              console.error(response);
+            }
+          });
+        } else {
+          fetch('/api/queue', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ queue: 'off' })
+          }).then(function(response) {
+            if (!response.ok) {
+              queueCheckbox.checked = true;
+              console.error(response);
+            }
+          });
+        }
+  });
     </script>
   `
   return new handlebars.SafeString(output);
@@ -392,7 +459,7 @@ handlebars.registerPartial('keywordsStreamPartial', `
     {{#each keywords}}
       {{keywordMessage this userId}}
     {{/each}}
-  </div> 
+  </div>
 `);
 
 handlebars.registerPartial('redemptionsTablePartial', `
@@ -449,11 +516,11 @@ handlebars.registerHelper('keywordMessage', function (keyword, userId) {
   keyword.keywords.forEach(keyword => {
     const buttons = `
       <nav class="no-space">
-        <button class="border left-round" disabled>
+        <button class="border left-round" ${keyword.triggered ? '' : 'disabled'} onclick="replayKeyword('${keyword.id}')">
           <i>refresh</i>
         </button>
-        <button class="border right-round">
-          <i>delete</i>
+        <button class="border right-round" ${keyword.triggered ? 'disabled' : ''} onclick="cancelKeyword('${keyword.id}')">
+          <i>cancel</i>
         </button>
       </nav>
     `
@@ -545,7 +612,8 @@ let keywords = [];
 let emotes = {};
 let badges = {};
 let cheermotes = {};
-let redemptions = {}
+let redemptions = {};
+let triggers = [];
 const limit = 25;
 const refresh = 5;
 const newDuration = 15;
@@ -607,7 +675,37 @@ app.get('/auth/twitch/callback', redirectAfterAuthentication);
 
 app.get('/app/keywords', checkAuthentication, async function (req, res) {
   const userId = req.session.passport.user.data[0].id
-  res.send(keywordsStreamTemplate({ keywords, userId}))
+  res.send(keywordsStreamTemplate({ keywords, userId }))
+});
+
+app.post('/app/keywords/:uuid', checkAuthentication, async function (req, res) {
+  const uuid = req.params.uuid
+  const userId = req.session.passport.user.data[0].id
+
+  let instance = findKeywordInstanceByTrigger(uuid)
+  if (!instance) {
+    return res.status(404).send('Keyword Instance not found');
+  }
+
+  if (req.body.cancel && req.body.replay) {
+    return res.status(400).send('Cannot cancel and replay at the same time');
+  }
+
+  if (!req.body.cancel && !req.body.replay) {
+    return res.status(400).send('Must specify either replay or cancel');
+  }
+
+  if (req.body.replay) {
+    generateTrigger(instance)
+    instance.triggered = false;
+  }
+
+  if (req.body.cancel) {
+    triggers = triggers.filter(trigger => trigger.triggeringId !== uuid)
+    instance.triggered = true;
+  }
+
+  res.send(keywordsStreamTemplate({ keywords, userId }))
 });
 
 app.get('/app/chat', checkAuthentication, async function (req, res) {
@@ -659,6 +757,10 @@ app.get('/api/messages', checkAuthentication, async function (req, res) {
   res.send(messages);
 });
 
+app.get('/api/triggers', checkAuthentication, async function (req, res) {
+  res.send(triggers);
+});
+
 app.get('/api/emotes', checkAuthentication, async function (req, res) {
   res.send(emotes);
 });
@@ -673,6 +775,26 @@ app.get('/api/cheermotes', checkAuthentication, async function (req, res) {
 
 app.get('/api/channel', checkAuthentication, async function (req, res) {
   res.send(current);
+});
+
+app.get('/api/queue', checkAuthentication, async function (req, res) {
+  res.send({ queue: queueCanProcess });
+});
+
+app.post('/api/queue', checkAuthentication, async function (req, res) {
+  const status = req.body.queue
+  if (!status) {
+    return res.status(400).send('Must specify queue status');
+  }
+  if (status === 'on') {
+    queueCanProcess = true;
+  } else if (status === 'off') {
+    queueCanProcess = false;
+  } else {
+    return res.status(400).send('Invalid queue status, must be either "on" or "off"');
+  }
+
+  res.send('Queue Status Updated: ' + status);
 });
 
 app.post('/api/test', checkAuthentication, async function (req, res) {
@@ -846,7 +968,7 @@ app.get('/channel/:channel', checkAuthentication, async function (req, res) {
               if (keywordPattern.test(text)) {
                 const [ number ] = text.match(digits)
                 acc.push(Object.assign({}, part, { type: 'keyword', text, keyword: { prefix: keywordName, number }}))
-                keywordInstances.push({ prefix: keywordName, number })
+                keywordInstances.push({ id: randomUUID(), prefix: keywordName, number, triggered: false })
               } else {
                 acc.push(Object.assign({}, part, { text }))
               }
@@ -857,15 +979,18 @@ app.get('/channel/:channel', checkAuthentication, async function (req, res) {
           return acc
         }, [])
 
+        // TODO: should I change "keywords" to "instances"?
         keywords.unshift(Object.assign({}, message, {type: 'keyword', keywords: keywordInstances, messageParts: reprocessedMessageParts}))
+        keywordInstances.forEach(keywordInstance => generateTrigger(keywordInstance))
       }
     } else {
       if (event.isCheer) {
         const keywordInstances = event.messageParts
           .filter(part => part.type === 'cheermote')
-          .map(part => ({ prefix: part.cheermote.prefix, number: part.cheermote.bits }))
+          .map(part => ({ id: randomUUID(), prefix: part.cheermote.prefix, number: part.cheermote.bits, triggered: false }))
 
         keywords.unshift(Object.assign({}, message, {type: 'keyword', keywords: keywordInstances, messageParts: event.messageParts}))
+        keywordInstances.forEach(keywordInstance => generateTrigger(keywordInstance))
       }
     }
 
@@ -889,11 +1014,85 @@ app.get('/channel/:channel', checkAuthentication, async function (req, res) {
 
 //
 //
+// Trigger Support
+const findNextTrigger = () => {
+  triggerCount = triggers.length;
+  currentIndex = 0;
+  while (currentIndex < triggerCount) {
+    const currentTrigger = triggers[currentIndex];
+    const shouldRemoveTrigger = currentTrigger.attempts >= 3;
+    if (shouldRemoveTrigger) {
+      currentTrigger.failure('Attempt Limit of 3 Reached.');
+      triggers.shift();
+    } else {
+      return currentTrigger;
+    }
+  }
+  return undefined;
+}
+
+const generateTrigger = (keywordDetails) => {
+  const trigger = {
+    triggeringId: keywordDetails.id,
+    trigger: () => {
+      io.emit('trigger', `owo${keywordDetails.number}`, keywordDetails.id)
+    },
+    resolution: () => {
+      markKeywordInstanceAsTriggered(keywordDetails.id);
+    },
+    failure: (error) => {
+      console.error(`[Error] Trigger (${keywordDetails.id}) failed to resolve: ${error}`)
+      markKeywordInstanceAsTriggered(keywordDetails.id);
+    },
+    attempts: 0
+  }
+
+  triggers.push(trigger)
+}
+
+const findKeywordInstanceByTrigger = (triggeringId) => {
+  let found = undefined
+  keywords.forEach(keyword => {
+    keyword.keywords.forEach(instance => {
+      if (instance.id === triggeringId && !found) {
+        found = instance
+      }
+    })
+  })
+  return found;
+}
+
+const markKeywordInstanceAsTriggered = (triggeringId) => {
+  const keywordInstance = findKeywordInstanceByTrigger(triggeringId);
+  if (keywordInstance) {
+    keywordInstance.triggered = true;
+  }
+}
+
+//
+//
 // Socket IO Configuration
 io.on("connection", (socket) => {
   console.log(`[Socket] Client Connected: ${socket.id}`)
   socket.on('disconnect', () => {
       console.log(`[Socket] Client Disconnected: ${socket.id}`)
+  })
+
+  socket.on('triggerResponse', (triggeringId) => {
+    console.log(`[Socket] Trigger Response: ${triggeringId}`)
+    triggers = triggers.filter(trigger => {
+      if (trigger.triggeringId === triggeringId) {
+        trigger.resolution()
+        return false;
+      }
+      return true;
+    });
+    currentTrigger = findNextTrigger();
+    if (currentTrigger && queueCanProcess) {
+      currentTrigger.trigger();
+      currentTrigger.attempts++;
+      console.log(`[Queue (socket)] Triggering ${currentTrigger.triggeringId} attempt ${currentTrigger.attempts} at ${Date.now()}`)
+    }
   })
 })
 
@@ -903,6 +1102,7 @@ io.on("connection", (socket) => {
 const cleanup = () => {
   // TODO: sent kill command to socket io
   io.emit('stop', 'Monitor Stopping, Cleanup in Progress');
+  scheduler.stop();
 }
 
 process.on('SIGINT', () => {
@@ -940,6 +1140,30 @@ function run_script(command, args, callback) {
 
 //
 //
+// Scheduled Queue Job
+let queueCanProcess = true;
+const secondsToForcedRestartQueue = 30;
+let lastProcessedMessageTime = undefined
+const scheduler = new ToadScheduler()
+const task = new Task('TriggerQueueProcessor', () => { 
+  const nothingHasBeenProcessedBefore = !lastProcessedMessageTime
+  const theLastProcessedTriggerHasBeenLongAgo = lastProcessedMessageTime && Date.now() - lastProcessedMessageTime > 1000 * secondsToForcedRestartQueue
+
+  if (nothingHasBeenProcessedBefore || theLastProcessedTriggerHasBeenLongAgo) {
+    const currentTrigger = findNextTrigger();
+    if (currentTrigger && queueCanProcess) {
+      currentTrigger.trigger();
+      currentTrigger.attempts++;
+
+      lastProcessedMessageTime = Date.now();
+      console.log(`[Queue (scheduled)] Triggering ${currentTrigger.triggeringId} attempt ${currentTrigger.attempts} at ${lastProcessedMessageTime}`)
+    }
+  }
+})
+const job = new SimpleIntervalJob({ seconds: 3 }, task)
+
+//
+//
 // Application Startup
 server.listen(PORT, function () {
   console.log(`Twitch auth sample listening on port ${PORT}!`)
@@ -956,4 +1180,6 @@ server.listen(PORT, function () {
         break;
     }
   })
+
+  scheduler.addSimpleIntervalJob(job)
 });
