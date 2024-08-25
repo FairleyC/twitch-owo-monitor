@@ -19,13 +19,13 @@ var request        = require('request');
 var handlebars     = require('handlebars');
 const res          = require('express/lib/response');
 var dotenvx        = require('@dotenvx/dotenvx');
-const { StaticAuthProvider } = require('@twurple/auth');
-const { ApiClient } = require('@twurple/api');
-const { EventSubWsListener} = require('@twurple/eventsub-ws');
-const { createServer } = require('http');
-const { spawn } = require('child_process');
-const { Server } = require('socket.io');
-const { randomUUID } = require('crypto');
+const { StaticAuthProvider }  = require('@twurple/auth');
+const { ApiClient }           = require('@twurple/api');
+const { EventSubWsListener}   = require('@twurple/eventsub-ws');
+const { createServer }        = require('http');
+const { spawn }               = require('child_process');
+const { Server }              = require('socket.io');
+const { randomUUID }          = require('crypto');
 const { ToadScheduler, SimpleIntervalJob, Task } = require('toad-scheduler');
 
 dotenvx.config();
@@ -36,7 +36,7 @@ const TWITCH_SECRET    = process.env.TWITCH_SECRET;
 const SESSION_SECRET   = process.env.SESSION_SECRET;
 const CALLBACK_URL     = process.env.CALLBACK_URL;  // You can run locally with - http://localhost:3000/auth/twitch/callback
 const PORT             = process.env.PORT || 3000;
-let DEV_MODE         = process.env.DEV_MODE || false;
+let DEV_MODE           = process.env.DEV_MODE || false;
 
 // Initialize Express and middlewares
 var app = express();
@@ -408,7 +408,7 @@ handlebars.registerPartial('informationColumn', `
             sensation
           }
 
-          fetch('/redemption', {
+          fetch('/app/redemption', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json'
@@ -434,7 +434,7 @@ handlebars.registerPartial('informationColumn', `
         }
 
         function deleteRedemption(uuid) {
-          fetch('/redemption/' + uuid, {
+          fetch('/app/redemption/' + uuid, {
             method: 'DELETE',
             headers: {
               'Content-Type': 'application/json'
@@ -714,7 +714,7 @@ app.get('/app/chat', checkAuthentication, async function (req, res) {
 });
 
 // TODO: check if the path needs 'app' prefix
-app.delete('/redemption/:uuid', checkAuthentication, async function (req, res) {
+app.delete('/app/redemption/:uuid', checkAuthentication, async function (req, res) {
   const uuid = req.params.uuid
   if (!Object.hasOwn(redemptions.idMap, uuid)) {
     return res.status(404).send('Redemption not found');
@@ -724,7 +724,7 @@ app.delete('/redemption/:uuid', checkAuthentication, async function (req, res) {
 });
 
 // TODO: check if the path needs 'app' prefix
-app.post('/redemption', checkAuthentication, async function (req, res) {
+app.post('/app/redemption', checkAuthentication, async function (req, res) {
   const { prefix, cost, description, sensation } = req.body
   // need to validate fields.
   //   prefix needs to be a valid cheermote prefix
