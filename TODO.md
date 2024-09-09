@@ -10,7 +10,11 @@
 1. Fix bug with replied mentions not highlighting
 1. Dev mode indicator, toolbar, and log output in the UI
 1. Child process doesn't close on exit
-
+1. Provide the OwoApp a way to notify node when a command fails
+    1. If Owo is still connecting
+    1. If the command sent doesn't match current options
+1. Provide a way for node to know that the OwoApp is connected
+1. Provide a way for the OwoApp to tell node that a redemption was invalid
 ---
 
 Identified when merging code:

@@ -10,37 +10,38 @@ or in the "license" file accompanying this file. This file is distributed on an 
 */
 
 // Define our dependencies
-const util         = require('util');
-var express        = require('express');
-var session        = require('express-session');
-var passport       = require('passport');
+var express = require('express');
+var session = require('express-session');
+var passport = require('passport');
 var OAuth2Strategy = require('passport-oauth').OAuth2Strategy;
-var request        = require('request');
-var handlebars     = require('handlebars');
-const res          = require('express/lib/response');
-var dotenvx        = require('@dotenvx/dotenvx');
-const { StaticAuthProvider }  = require('@twurple/auth');
-const { ApiClient }           = require('@twurple/api');
-const { EventSubWsListener}   = require('@twurple/eventsub-ws');
-const { createServer }        = require('http');
-const { spawn }               = require('child_process');
-const { Server }              = require('socket.io');
-const { randomUUID }          = require('crypto');
+var request = require('request');
+var handlebars = require('handlebars');
+const fs = require('fs');
+var dotenvx = require('@dotenvx/dotenvx');
+const { StaticAuthProvider } = require('@twurple/auth');
+const { ApiClient } = require('@twurple/api');
+const { EventSubWsListener } = require('@twurple/eventsub-ws');
+const { createServer } = require('http');
+const { spawn } = require('child_process');
+const { Server } = require('socket.io');
+const { randomUUID } = require('crypto');
 const { ToadScheduler, SimpleIntervalJob, Task } = require('toad-scheduler');
+
 
 dotenvx.config();
 
 // Define our constants, you will change these with your own
 const TWITCH_CLIENT_ID = process.env.TWITCH_CLIENT_ID;
-const TWITCH_SECRET    = process.env.TWITCH_SECRET;
-const SESSION_SECRET   = process.env.SESSION_SECRET;
-const CALLBACK_URL     = process.env.CALLBACK_URL;  // You can run locally with - http://localhost:3000/auth/twitch/callback
-const PORT             = process.env.PORT || 3000;
-let DEV_MODE           = process.env.DEV_MODE || false;
+const TWITCH_SECRET = process.env.TWITCH_SECRET;
+const SESSION_SECRET = process.env.SESSION_SECRET;
+const CALLBACK_URL = process.env.CALLBACK_URL;  // You can run locally with - http://localhost:3000/auth/twitch/callback
+const PORT = process.env.PORT || 3000;
+let DEV_MODE = process.env.DEV_MODE || false;
+const filename = process.env.REDEMPTIONS_FILE || './redemptions.json';
 
 // Initialize Express and middlewares
 var app = express();
-app.use(session({secret: SESSION_SECRET, resave: false, saveUninitialized: false}));
+app.use(session({ secret: SESSION_SECRET, resave: false, saveUninitialized: false }));
 app.use(express.static('public'));
 app.use(passport.initialize());
 app.use(passport.session());
@@ -52,7 +53,7 @@ var io = new Server(server);
 //
 //
 // Authentication Support
-OAuth2Strategy.prototype.userProfile = function(accessToken, done) {
+OAuth2Strategy.prototype.userProfile = function (accessToken, done) {
   // Override passport profile function to get user profile from Twitch API
   var options = {
     url: 'https://api.twitch.tv/helix/users',
@@ -73,23 +74,23 @@ OAuth2Strategy.prototype.userProfile = function(accessToken, done) {
   });
 }
 
-passport.serializeUser(function(user, done) {
-    done(null, user);
+passport.serializeUser(function (user, done) {
+  done(null, user);
 });
 
-passport.deserializeUser(function(user, done) {
-    done(null, user);
+passport.deserializeUser(function (user, done) {
+  done(null, user);
 });
 
 passport.use('twitch', new OAuth2Strategy({
-    authorizationURL: 'https://id.twitch.tv/oauth2/authorize',
-    tokenURL: 'https://id.twitch.tv/oauth2/token',
-    clientID: TWITCH_CLIENT_ID,
-    clientSecret: TWITCH_SECRET,
-    callbackURL: CALLBACK_URL,
-    state: false
-  },
-  function(accessToken, refreshToken, profile, done) {
+  authorizationURL: 'https://id.twitch.tv/oauth2/authorize',
+  tokenURL: 'https://id.twitch.tv/oauth2/token',
+  clientID: TWITCH_CLIENT_ID,
+  clientSecret: TWITCH_SECRET,
+  callbackURL: CALLBACK_URL,
+  state: false
+},
+  function (accessToken, refreshToken, profile, done) {
     profile.accessToken = accessToken;
     profile.refreshToken = refreshToken;
 
@@ -279,8 +280,11 @@ handlebars.registerHelper('controlBar', function () {
     </div>
     <div class="s8"></div>
     <div class="s2 middle-align right-align">
+      <button class="small circle" id ="launch-owo">
+        <i>publish</i>
+      </button>
       <label class="switch icon">
-        <input type="checkbox" checked="${this.queue}" id="queue-checkbox">
+        <input type="checkbox" ${this.queue && "checked"} id="queue-checkbox">
         <span>
           <i>bolt</i>
         </span>
@@ -298,7 +302,27 @@ handlebars.registerHelper('controlBar', function () {
           document.getElementById('information').style.display = 'block';
         }
       });
+      
       const queueCheckbox = document.getElementById('queue-checkbox');
+      const queueRefreshDelay = 5000;
+
+      setInterval(function() {
+        fetch('/api/queue', {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        }).then(function(response) {
+          if (!response.ok) {
+            console.error(response);
+          } else {
+            response.json().then(function(json) {
+              queueCheckbox.checked = json.queue;
+            })
+          }
+        });
+      }, queueRefreshDelay);
+
       queueCheckbox.addEventListener('change', function() {
         if (queueCheckbox.checked) {
           fetch('/api/queue', {
@@ -327,7 +351,23 @@ handlebars.registerHelper('controlBar', function () {
             }
           });
         }
-  });
+      });
+
+      const launchOwoButton = document.getElementById('launch-owo');
+      launchOwoButton.addEventListener('click', function() {
+        fetch('/api/owo', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({})
+        }).then(function(response) {
+          if (!response.ok) {
+            console.error(response);
+          }
+        });
+      });
+
     </script>
   `
   return new handlebars.SafeString(output);
@@ -449,6 +489,38 @@ handlebars.registerPartial('informationColumn', `
             }
           });
         }
+
+        function editRedemption(uuid) {
+          fetch('/api/redemption/' + uuid).then(function(response) {
+            if (response.ok) {
+              response.json().then(function(json) {
+                document.getElementById('new-sensation-prefix').value = json.prefix;
+                document.getElementById('new-sensation-cost').value = json.cost;
+                document.getElementById('new-sensation-description').value = json.description;
+                document.getElementById('new-sensation-code').value = json.sensation;
+              });
+            } else {
+              console.error(response);
+            }
+          });
+        }
+
+        function refreshRedemptions() {
+          fetch('/app/redemptions').then(function(response) {
+            if (response.ok) {
+              response.text().then(function(text) {
+                document.getElementById('redemptions-table').innerHTML = text;
+              });
+            } else {
+              console.error(response);
+            }
+          });
+        }
+
+        const redemptionRefreshDelay = 5000;
+        setInterval(function() {
+          refreshRedemptions();
+        }, redemptionRefreshDelay);
       </script>
     </div>
 `)
@@ -470,17 +542,38 @@ handlebars.registerPartial('redemptionsTablePartial', `
       <span class="s8 bold">Description</span>
       
       {{#each redemptions.list}}
-        <span class="s2">{{this.prefix}}</span>
-        <span class="s2">{{this.cost}}</span>
-        <span class="s6">{{this.description}}</span>
-        <div class="s2 right-align">
-          <button class="transparent circle" onclick="deleteRedemption('{{this.uuid}}')">
-            <i>delete</i>
-          </button>
+        <div class="s12 grid no-space middle-align no-margin">
+          <span class="s2">{{this.prefix}}</span>
+          <span class="s2">{{this.cost}}</span>
+          <span class="s6">{{this.description}}</span>
+
+          <nav class="s2 right-align no-space no-margin">
+            <button class="transparent circle" onclick="editRedemption('{{this.uuid}}')">
+              <i>edit</i>
+            </button>
+            <button class="transparent circle" onclick="deleteRedemption('{{this.uuid}}')">
+              <i>delete</i>
+            </button>
+          </nav>
+
+          {{redemptionsTableMetadata this}}
         </div>
       {{/each}}
     </div>
 `);
+
+handlebars.registerHelper('redemptionsTableMetadata', function (redemption) {
+  let output = '';
+  const metadata = redemptions.metadataMap[redemption.uuid];
+
+  if (!metadata.valid) {
+    output = `<div class="s12 error-text small-text">Sensation was parsed and rejected.</div>`
+  } else if (!metadata.usable) {
+    output = `<div class="s12 secondary-text small-text">Sensation hasn't been sent to OwO yet.</div>`
+  }
+
+  return new handlebars.SafeString(output);
+});
 
 handlebars.registerPartial('developmentToolbar', `
   <div>
@@ -614,6 +707,8 @@ let badges = {};
 let cheermotes = {};
 let redemptions = {};
 let triggers = [];
+let owoProcess = undefined;
+let owoConnection = false;
 const limit = 25;
 const refresh = 5;
 const newDuration = 15;
@@ -621,19 +716,34 @@ const newDuration = 15;
 //
 //
 // Redemption Management
-const parseRedemptionsFromFile = (filename) => {
+
+const parseRedemptions = () => {
+  if (fs.existsSync(filename)) {
+    parseRedemptionsFromFile();
+  } else {
+    parseRedemptionsFromStaticCode();
+  }
+}
+
+const writeRedemptionsToFile = () => {
+  fs.writeFileSync(filename, JSON.stringify(redemptions.list));
+}
+
+const parseRedemptionsFromFile = () => {
   const data = fs.readFileSync(filename, 'utf8');
-  redemptions = JSON.parse(data);
+  // TODO: validate data before creating maps.
+  redemptions = createRedemptionMaps(JSON.parse(data));
 }
 
 const parseRedemptionsFromStaticCode = () => {
   staticRedemptions = [
-    { uuid: crypto.randomUUID(), description: "10 Description", cost: 10, prefix: "cheer" },
-    { uuid: crypto.randomUUID(), description: "20 Description", cost: 20, prefix: "cheer" },
-    { uuid: crypto.randomUUID(), description: "30 Description", cost: 30, prefix: "cheer" },
+    { uuid: crypto.randomUUID(), description: "10 Description", cost: 10, prefix: "cheer", sensation: "10 Description"},
+    { uuid: crypto.randomUUID(), description: "20 Description", cost: 20, prefix: "cheer", sensation: "20 Description"},
+    { uuid: crypto.randomUUID(), description: "30 Description", cost: 30, prefix: "cheer", sensation: "30 Description"},
   ]
-  
+
   redemptions = createRedemptionMaps(staticRedemptions);
+  writeRedemptionsToFile();
 }
 
 const createRedemptionMaps = (list) => {
@@ -647,10 +757,32 @@ const createRedemptionMaps = (list) => {
     return acc;
   }, {});
 
+  const oldMetadata = redemptions.metadataMap || {};
+  const newMetadata = {};
+  list.forEach(redemption => {
+    let redemptionMetadata = {};
+    if (Object.hasOwn(oldMetadata, redemption.uuid)) {
+      redemptionMetadata = oldMetadata[redemption.uuid];
+    } else {
+      // generate new metadata
+      // codes are assumed valid until proven otherwise by OwO parsing errors.
+      // codes are unusable until the OwoApp is restarted.
+      redemptionMetadata = { valid: true, usable: false };
+    }
+    newMetadata[redemption.uuid] = redemptionMetadata;
+  });
+
+  const validMessagePatterns = list.map(redemption => function(message, metadata) {
+    const regex = new RegExp(String.raw`\b${redemption.prefix}${redemption.cost}\b`)
+    return regex.test(message) && metadata[redemption.uuid].usable && metadata[redemption.uuid].valid;
+  });
+
   return {
     cheermoteMap,
     idMap,
-    list
+    list,
+    metadataMap: newMetadata,
+    patterns: validMessagePatterns
   }
 }
 
@@ -658,6 +790,13 @@ const removeRedemption = (uuid) => {
   const redemptionIndex = redemptions.idMap[uuid].index
   const newList = redemptions.list.toSpliced(redemptionIndex, 1)
   redemptions = createRedemptionMaps(newList)
+  writeRedemptionsToFile();
+}
+
+const addRedemption = (newRedemption) => {
+  const newList = [...redemptions.list, newRedemption]
+  redemptions = createRedemptionMaps(newList)
+  writeRedemptionsToFile();
 }
 
 //
@@ -676,6 +815,10 @@ app.get('/auth/twitch/callback', redirectAfterAuthentication);
 app.get('/app/keywords', checkAuthentication, async function (req, res) {
   const userId = req.session.passport.user.data[0].id
   res.send(keywordsStreamTemplate({ keywords, userId }))
+});
+
+app.get('/app/redemptions', checkAuthentication, async function (req, res) {
+  res.send(redemptionsTableTemplate({ redemptions }))
 });
 
 app.post('/app/keywords/:uuid', checkAuthentication, async function (req, res) {
@@ -710,7 +853,7 @@ app.post('/app/keywords/:uuid', checkAuthentication, async function (req, res) {
 
 app.get('/app/chat', checkAuthentication, async function (req, res) {
   const userId = req.session.passport.user.data[0].id
-  res.send(chatStreamTemplate({ messages, userId}))
+  res.send(chatStreamTemplate({ messages, userId }))
 });
 
 // TODO: check if the path needs 'app' prefix
@@ -732,7 +875,7 @@ app.post('/app/redemption', checkAuthentication, async function (req, res) {
   //   description needs to be a string
   //   sensation needs to be a valid sensation *cry*
 
-  const newRedemption = { 
+  const newRedemption = {
     uuid: crypto.randomUUID(),
     prefix,
     cost,
@@ -740,9 +883,51 @@ app.post('/app/redemption', checkAuthentication, async function (req, res) {
     sensation
   }
 
-  const newList = [...redemptions.list, newRedemption]
-  redemptions = createRedemptionMaps(newList)
+  addRedemption(newRedemption);
   res.status(200).send(redemptionsTableTemplate({ redemptions }))
+});
+
+app.get('/api/redemption/:uuid', checkAuthentication, async function (req, res) {
+  const uuid = req.params.uuid
+  const redemption = redemptions.idMap[uuid]
+  if (!redemption) {
+    return res.status(404).send('Redemption not found');
+  }
+  res.send(redemption);
+});
+
+app.post('/api/owo', checkAuthentication, async function (req, res) {
+  const owoExitFunction = (output, code) => {
+    owoProcess = undefined;
+    console.log("[Child Process (OwoApp.exe)] Exited with status:", code)
+  }
+  const sensationFileOption = `--sensation-file`
+
+  if (owoProcess) {
+    // Setup a timeout for the process if it doesn't finish in the allotted time.
+    const timeout = 10 * 1000;
+    owoTimeout = setTimeout(() => {
+      console.log('[Node] OwO Timeout Reached');
+      owoProcess.kill('SIGKILL');
+    }, timeout);
+
+    // Setup exit listener to restart once the process exits.
+    owoProcess.on('exit', () => {
+      console.log('[Node] OwO Restarting');
+      clearTimeout(owoTimeout);
+      owoProcess = run_script('OwoApp.exe', [sensationFileOption, filename], owoExitFunction)
+    });
+
+    // Send the signal to closed the process.
+    closeOwoApplication();
+  } else {
+    owoProcess = run_script('OwoApp.exe', [sensationFileOption, filename], owoExitFunction)
+  }
+  res.status(200).send('OwO Launched');
+});
+
+app.get('/health', checkAuthentication, async function (req, res) {
+  res.send({ node: true, owo: owoProcess !== undefined, queue: queueCanProcess, vest: owoConnection });
 });
 
 app.get('/api/keywords', checkAuthentication, async function (req, res) {
@@ -785,6 +970,9 @@ app.post('/api/queue', checkAuthentication, async function (req, res) {
   const status = req.body.queue
   if (!status) {
     return res.status(400).send('Must specify queue status');
+  }
+  if (!owoConnection) {
+    return res.status(502).send('OwO is not currently connected, queue cannot be started until OwO is available');
   }
   if (status === 'on') {
     queueCanProcess = true;
@@ -843,7 +1031,7 @@ app.get('/channel/:channel', checkAuthentication, async function (req, res) {
   }
 
   const { auth, api, listener } = await connectToTwitch(req.session.passport.user.accessToken);
-  
+
   //
   //
   // lookup channel to find broadcaster
@@ -856,11 +1044,6 @@ app.get('/channel/:channel', checkAuthentication, async function (req, res) {
     return res.status(404).send(`Channel ${channel} not found`);
   }
 
-  //
-  //
-  // Launch Owo Application and Establish Connection
-  run_script('OwoApp.exe', [], (output, code) => { console.log("[Child Process (OwoApp.exe)] Exited with status:", code) })
-  
   //
   //
   // emotes
@@ -904,16 +1087,16 @@ app.get('/channel/:channel', checkAuthentication, async function (req, res) {
   }
 
   globalBadges.forEach(badge => {
-    badges[badge.id] = badge.versions.reduce((acc, version) => { 
+    badges[badge.id] = badge.versions.reduce((acc, version) => {
       acc[version.id] = version;
-      return acc 
+      return acc
     }, {});
   });
 
   channelBadges.forEach(badge => {
-    badges[badge.id] = badge.versions.reduce((acc, version) => { 
+    badges[badge.id] = badge.versions.reduce((acc, version) => {
       acc[version.id] = version;
-      return acc 
+      return acc
     }, {});
   });
 
@@ -966,8 +1149,8 @@ app.get('/channel/:channel', checkAuthentication, async function (req, res) {
             const digits = /\d+/
             newParts = newText.forEach(text => {
               if (keywordPattern.test(text)) {
-                const [ number ] = text.match(digits)
-                acc.push(Object.assign({}, part, { type: 'keyword', text, keyword: { prefix: keywordName, number }}))
+                const [number] = text.match(digits)
+                acc.push(Object.assign({}, part, { type: 'keyword', text, keyword: { prefix: keywordName, number } }))
                 keywordInstances.push({ id: randomUUID(), prefix: keywordName, number, triggered: false })
               } else {
                 acc.push(Object.assign({}, part, { text }))
@@ -980,17 +1163,22 @@ app.get('/channel/:channel', checkAuthentication, async function (req, res) {
         }, [])
 
         // TODO: should I change "keywords" to "instances"?
-        keywords.unshift(Object.assign({}, message, {type: 'keyword', keywords: keywordInstances, messageParts: reprocessedMessageParts}))
+        keywords.unshift(Object.assign({}, message, { type: 'keyword', keywords: keywordInstances, messageParts: reprocessedMessageParts }))
         keywordInstances.forEach(keywordInstance => generateTrigger(keywordInstance))
       }
     } else {
+      function cheermoteMatchesRedemptionPattern(cheermote) {
+        return redemptions.patterns.some(pattern => pattern(cheermote, redemptions.metadataMap));
+      }
       if (event.isCheer) {
         const keywordInstances = event.messageParts
-          .filter(part => part.type === 'cheermote')
+          .filter(part => part.type === 'cheermote' && cheermoteMatchesRedemptionPattern(part.cheermote.prefix + part.cheermote.bits))
           .map(part => ({ id: randomUUID(), prefix: part.cheermote.prefix, number: part.cheermote.bits, triggered: false }))
-
-        keywords.unshift(Object.assign({}, message, {type: 'keyword', keywords: keywordInstances, messageParts: event.messageParts}))
-        keywordInstances.forEach(keywordInstance => generateTrigger(keywordInstance))
+        
+        if (keywordInstances.length > 0) {
+          keywords.unshift(Object.assign({}, message, { type: 'keyword', keywords: keywordInstances, messageParts: event.messageParts }))
+          keywordInstances.forEach(keywordInstance => generateTrigger(keywordInstance))
+        }
       }
     }
 
@@ -1035,7 +1223,7 @@ const generateTrigger = (keywordDetails) => {
   const trigger = {
     triggeringId: keywordDetails.id,
     trigger: () => {
-      io.emit('trigger', `owo${keywordDetails.number}`, keywordDetails.id)
+      io.emit('trigger', `${keywordDetails.prefix}${keywordDetails.number}`, keywordDetails.id)
     },
     resolution: () => {
       markKeywordInstanceAsTriggered(keywordDetails.id);
@@ -1075,7 +1263,22 @@ const markKeywordInstanceAsTriggered = (triggeringId) => {
 io.on("connection", (socket) => {
   console.log(`[Socket] Client Connected: ${socket.id}`)
   socket.on('disconnect', () => {
-      console.log(`[Socket] Client Disconnected: ${socket.id}`)
+    console.log(`[Socket] Client Disconnected: ${socket.id}`)
+  })
+
+  socket.on('owoConnected', () => {
+    owoConnection = true;
+    // should this turn on the queue or should it be manually turned on?
+
+    // Mark all redemptions as usable if they didn't return as invalid.
+    Object.values(redemptions.metadataMap).forEach((metadata) => {
+      metadata.usable = metadata.valid;
+    });
+  })
+
+  socket.on('sensationParsingError', (uuid) => {
+    // flag the redemption as invalid
+    redemptions.metadataMap[uuid].valid = false;
   })
 
   socket.on('triggerResponse', (triggeringId) => {
@@ -1094,20 +1297,41 @@ io.on("connection", (socket) => {
       console.log(`[Queue (socket)] Triggering ${currentTrigger.triggeringId} attempt ${currentTrigger.attempts} at ${Date.now()}`)
     }
   })
+
+  socket.on('triggerError', (error) => {
+    switch (error.type) {
+      case 'Disconnected':
+        owoConnection = false;
+        queueCanProcess = false;
+        break;
+      case 'Unrecognized':
+        // For right now we will just retry them but we should probably mark the redemption as invalid.
+        // This might happen if a redemption is added after the OwO application is launched.
+        // I could avoid this by preventing detection until restart and then flagging all new sensations as valid.
+        break;
+      default:
+        // Do nothing for now
+        break;
+    }
+  })
 })
 
 //
 //
 // Process Management
+const closeOwoApplication = () => {
+  io.emit('stop', 'Monitor Stopping, Cleanup in Progress');
+};
+
 const cleanup = () => {
   // TODO: sent kill command to socket io
-  io.emit('stop', 'Monitor Stopping, Cleanup in Progress');
+  closeOwoApplication();
   scheduler.stop();
 }
 
 process.on('SIGINT', () => {
-    cleanup();
-    process.exit(0);
+  cleanup();
+  process.exit(0);
 })
 
 //
@@ -1120,19 +1344,19 @@ function run_script(command, args, callback) {
 
   child.stdout.setEncoding('utf8')
   child.stdout.on('data', function (data) {
-      console.log(`[Child Process (${command}, stdout)] ${data.toString().trim()}`)
-      data = data.toString()
-      scriptOutput += data
+    console.log(`[Child Process (${command}, stdout)] ${data.toString().trim()}`)
+    data = data.toString()
+    scriptOutput += data
   })
 
   child.stderr.setEncoding('utf8')
   child.stderr.on('data', function (data) {
-      data = data.toString()
-      scriptOutput += data
+    data = data.toString()
+    scriptOutput += data
   })
 
   child.on('close', function (code) {
-      callback(scriptOutput, code)
+    callback(scriptOutput, code)
   })
 
   return child
@@ -1141,11 +1365,11 @@ function run_script(command, args, callback) {
 //
 //
 // Scheduled Queue Job
-let queueCanProcess = true;
+let queueCanProcess = false;
 const secondsToForcedRestartQueue = 30;
 let lastProcessedMessageTime = undefined
 const scheduler = new ToadScheduler()
-const task = new Task('TriggerQueueProcessor', () => { 
+const task = new Task('TriggerQueueProcessor', () => {
   const nothingHasBeenProcessedBefore = !lastProcessedMessageTime
   const theLastProcessedTriggerHasBeenLongAgo = lastProcessedMessageTime && Date.now() - lastProcessedMessageTime > 1000 * secondsToForcedRestartQueue
 
@@ -1168,7 +1392,7 @@ const job = new SimpleIntervalJob({ seconds: 3 }, task)
 server.listen(PORT, function () {
   console.log(`Twitch auth sample listening on port ${PORT}!`)
 
-  parseRedemptionsFromStaticCode();
+  parseRedemptions();
 
   process.argv.forEach(arg => {
     switch (arg) {
