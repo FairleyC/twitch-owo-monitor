@@ -1,5 +1,5 @@
 const { getSocketIoServer } = require("../notifications/service");
-const { stopQueueProcessing } = require("../queue/processor");
+const { disableQueue } = require("../queue/trigger/service");
 const { getPathToRedemptionsFile } = require("../redemptions/service");
 const run_script = require('../utility/run');
 
@@ -37,7 +37,7 @@ const startOwoApplication = () => {
 const owoExitFunction = (output, code) => {
     owoProcess = undefined;
     owoConnection = false;
-    stopQueueProcessing();
+    disableQueue();
     console.log("[Child Process (OwoApp.exe)] Exited with status:", code)
 }
 

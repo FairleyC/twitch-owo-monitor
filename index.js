@@ -88,7 +88,7 @@ process.once('SIGUSR2', cleanup);
 //
 // Application Startup
 server.listen(PORT, function () {
-  console.log(`Twitch auth sample listening on port ${PORT}!`)
+  console.log(`[Node] Twitch auth sample listening on port ${PORT}!`)
 
   initializeRedemptions();
 

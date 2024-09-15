@@ -1,7 +1,7 @@
 var express = require('express'), router = express.Router();
 
 const { isOwoVestConnected, isOwoApplicationRunning } = require('../owo/service');
-const { getQueueStatus } = require('../queue/processor');
+const { getQueueStatus } = require('../queue/trigger/service');
 const { isAuthenticated, isConnectedToTwitch } = require('../twitch/auth/service');
 const { isChannelConnected } = require('../twitch/channel/service');
 const { isDevMode } = require('./dev/service');

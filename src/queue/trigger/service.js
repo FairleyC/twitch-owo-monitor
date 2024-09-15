@@ -3,6 +3,7 @@ const { getSocketIoServer } = require("../../notifications/service");
 
 let triggers = [];
 let triggerBeingProcessed = false;
+let triggersCanBeProcessed = false;
 const maxRetries = 3;
 
 const findNextTrigger = () => {
@@ -60,9 +61,8 @@ const processTriggerResponse = (triggeringId) => {
         return true;
     });
     currentTrigger = findNextTrigger();
-    if (currentTrigger && queueCanProcess) {
+    if (currentTrigger && triggersCanBeProcessed) {
         currentTrigger.trigger();
-        currentTrigger.attempts++;
         console.log(`[Queue (socket)] Triggering ${currentTrigger.triggeringId} attempt ${currentTrigger.attempts} at ${Date.now()}`)
     }
 }
@@ -84,4 +84,8 @@ const processTriggerError = (error) => {
     }
 }
 
-module.exports = { generateTrigger, findNextTrigger, getTriggers, processTriggerError, processTriggerResponse, isTriggerBeingProcessed };
+const getQueueStatus = () => triggersCanBeProcessed;
+const enableQueue = () => triggersCanBeProcessed = true;
+const disableQueue = () => triggersCanBeProcessed = false;
+
+module.exports = { generateTrigger, findNextTrigger, getTriggers, processTriggerError, processTriggerResponse, isTriggerBeingProcessed, getQueueStatus, enableQueue, disableQueue };

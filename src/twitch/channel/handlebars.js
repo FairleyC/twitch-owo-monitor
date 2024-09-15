@@ -1,8 +1,8 @@
 const { getMessages } = require("../../chat/service");
 const { getKeywords } = require("../../keywords/service");
+const { getQueueStatus } = require("../../queue/trigger/service");
 const { getRedemptions } = require("../../redemptions/service");
 const { isDevMode } = require("../../utility/dev/service");
-const { getQueueStatus } = require("../../queue/processor");
 const handlebars = require('handlebars');
 
 var channelTemplate = handlebars.compile(`

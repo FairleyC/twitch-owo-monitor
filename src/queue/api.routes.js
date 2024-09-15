@@ -2,11 +2,7 @@ var express = require('express'), router = express.Router();
 
 const { isOwoVestConnected } = require('../owo/service');
 const { checkAuthentication } = require('../twitch/auth/service');
-const { enableQueue, disableQueue, getQueueStatus } = require('./processor');
-
-router.get('/', checkAuthentication, async function (req, res) {
-    res.send({ queue: getQueueStatus() });
-});
+const { enableQueue, disableQueue } = require('./trigger/service');
 
 router.post('/', checkAuthentication, async function (req, res) {
     const status = req.body.queue

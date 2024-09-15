@@ -4,11 +4,11 @@ const isDevMode = () => devMode;
 
 const enableDevMode = () => { 
     devMode = true
-    console.log(`Dev Mode Enabled`)
+    console.log(`[Node] Dev Mode Enabled`)
 }
 
 if (isDevMode()) {
-    console.log(`Dev Mode Enabled`)
+    console.log(`[Node] Dev Mode Enabled`)
 }
 
 module.exports = { isDevMode, enableDevMode };
