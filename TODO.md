@@ -24,3 +24,7 @@ Identified when merging code:
 - Need a OwoApp launch mechanism with the list of possible redemptions
 - Need test endpoint only available during dev mode, maybe this is a button that only loads when dev mode is enabled?
 
+
+// move debug test code a features and make it create keywords.
+
+

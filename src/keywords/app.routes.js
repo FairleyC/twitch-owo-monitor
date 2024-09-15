@@ -1,6 +1,6 @@
 var express = require('express'), router = express.Router();
 
-const { generateTrigger } = require('../queue/trigger/service');
+const { generateTrigger, cancelTrigger } = require('../queue/trigger/service');
 const { checkAuthentication } = require("../twitch/auth/service");
 const { keywordsStreamTemplate } = require("./handlebars");
 const { getKeywords, findKeywordInstanceByTrigger } = require('./service');
@@ -34,7 +34,7 @@ router.post('/:uuid', checkAuthentication, async function (req, res) {
     }
 
     if (req.body.cancel) {
-        triggers = triggers.filter(trigger => trigger.triggeringId !== uuid)
+        cancelTrigger(uuid)
         instance.triggered = true;
     }
 

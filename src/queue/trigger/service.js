@@ -23,12 +23,11 @@ const findNextTrigger = () => {
 }
 
 const generateTrigger = (keywordDetails) => {
-    let attempts = 0;
     const trigger = {
         triggeringId: keywordDetails.id,
         triggeringWord: keywordDetails.prefix + keywordDetails.number,
-        trigger: () => {
-            attempts++;
+        trigger: function() {
+            this.attempts++;
             triggerBeingProcessed = true;
             getSocketIoServer().emit('trigger', `${keywordDetails.prefix}${keywordDetails.number}`, keywordDetails.id)
         },
@@ -41,7 +40,7 @@ const generateTrigger = (keywordDetails) => {
             console.error(`[Error] Trigger (${keywordDetails.id}) failed to resolve: ${error}`)
             markKeywordInstanceAsErrored(keywordDetails.id);
         },
-        attempts: attempts
+        attempts: 0
     }
 
     triggers.push(trigger)
@@ -84,8 +83,12 @@ const processTriggerError = (error) => {
     }
 }
 
+const cancelTrigger = (triggeringId) => {
+    triggers = triggers.filter(trigger => trigger.triggeringId !== triggeringId)
+}
+
 const getQueueStatus = () => triggersCanBeProcessed;
 const enableQueue = () => triggersCanBeProcessed = true;
 const disableQueue = () => triggersCanBeProcessed = false;
 
-module.exports = { generateTrigger, findNextTrigger, getTriggers, processTriggerError, processTriggerResponse, isTriggerBeingProcessed, getQueueStatus, enableQueue, disableQueue };
+module.exports = { generateTrigger, findNextTrigger, getTriggers, processTriggerError, processTriggerResponse, isTriggerBeingProcessed, getQueueStatus, enableQueue, disableQueue, cancelTrigger };
