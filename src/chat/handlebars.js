@@ -19,7 +19,7 @@ const configureChatHandlebars = (handlebars) => {
         const line = `<span>${badgeString}</span><span style="color:${message.color}">${message.user}</span>: ${content}`
       
         let classValue = { color: "", size: "" };
-        if (message.new) {
+        if ((Date.now() - message.when) < (1000 * 60)) {
           classValue.color = 'surface-bright'
           classValue.size = 'large-text'
         }

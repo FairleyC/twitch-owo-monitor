@@ -1,9 +1,9 @@
 // connects to twitch and maintains state.
 
-const { processMessage, resetMessages, reduceMessageHighlight } = require("../../chat/service");
+const { processMessage, resetMessages } = require("../../chat/service");
 const { connectToTwitch } = require("../auth/service");
 const { loadEmotes, loadCheermotes, loadBadges } = require("../service");
-const { resetKeywords, reduceKeywordHighlight } = require("../../keywords/service");
+const { resetKeywords } = require("../../keywords/service");
 
 let channel = {};
 
@@ -11,8 +11,6 @@ const connectToTwitchChannel = async (channelName, user) => {
     // run this code if we are refreshing the current channel
     const isRefreshCurrentChannel = channel.name === channelName
     if (isRefreshCurrentChannel) {
-      reduceMessageHighlight();
-      reduceKeywordHighlight();
       return;
     }
   

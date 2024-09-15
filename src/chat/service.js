@@ -35,16 +35,13 @@ const addMessage = (message) => {
 const resetMessages = () => messages = [];
 
 const processMessage = async (event) => {
-    const newDuration = 15;
-    const refresh = 5;
-
     const message = {
         user: event.chatterDisplayName,
         color: event.color || '#888888',
         badges: event.badges,
         messageParts: event.messageParts,
         text: event.messageText,
-        new: Math.ceil(newDuration / refresh),
+        when: Date.now()
     }
 
     if (isDevMode()) {
@@ -124,8 +121,4 @@ const processDevModeKeyword = (message) => {
     }
 }
 
-const reduceMessageHighlight = () => {
-    messages.filter(m => m.new > 0).map(m => m.new--);
-}
-
-module.exports = { generateMessageHtml, getMessages, addMessage, processMessage, resetMessages, reduceMessageHighlight };
+module.exports = { generateMessageHtml, getMessages, addMessage, processMessage, resetMessages };

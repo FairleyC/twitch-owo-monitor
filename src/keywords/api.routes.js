@@ -30,6 +30,7 @@ router.post('/', checkAuthentication, async function (req, res) {
         return res.status(400).send('Redemption is not usable or valid');
     }
 
+    // should all probably go to the service.
     const text = "This keyword was manually triggered by the Twitch Monitor."
     const message = {
         user: "Me",
@@ -37,7 +38,7 @@ router.post('/', checkAuthentication, async function (req, res) {
         badges: [],
         messageParts: [{type: 'text', text}],
         text,
-        new: Math.ceil(5),
+        when: Date.now(),
     }
 
     const instance = { id: randomUUID(), prefix: redemption.prefix, number: redemption.cost, triggered: false, errored: false, description: redemption.description }

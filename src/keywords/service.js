@@ -1,9 +1,5 @@
 let keywords = [];
 
-const reduceKeywordHighlight = () => {
-    keywords.filter(m => m.new > 0).map(m => m.new--);
-}
-
 const getKeywords = () => keywords;
 
 const resetKeywords = () => {
@@ -45,4 +41,4 @@ const generateKeywordHtml = (keyword) => {
     return `<span style="color: gold">⚡${keyword.number}</span>`
 }
 
-module.exports = { reduceKeywordHighlight, getKeywords, resetKeywords, addKeyword, markKeywordInstanceAsTriggered, markKeywordInstanceAsErrored, generateKeywordHtml, findKeywordInstanceByTrigger };
+module.exports = { getKeywords, resetKeywords, addKeyword, markKeywordInstanceAsTriggered, markKeywordInstanceAsErrored, generateKeywordHtml, findKeywordInstanceByTrigger };

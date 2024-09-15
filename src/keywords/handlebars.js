@@ -34,7 +34,7 @@ const configureKeywordsHandlebars = (handlebars) => {
         })
 
         let classValue = { color: "", size: "" };
-        if (keyword.new) {
+        if ((Date.now() - keyword.when) < (1000 * 60)) {
             classValue.color = 'surface-bright'
             classValue.size = 'large-text'
         }
