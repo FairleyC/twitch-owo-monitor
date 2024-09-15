@@ -126,15 +126,18 @@ const configureRedemptionsHandlebars = (handlebars) => {
         });
       }
 
-      function testRedemption(uuid) {
-        fetch('/api/test/redemptions/' + uuid, {
+      function manuallyTriggerRedemption(uuid) {
+        fetch('/api/keywords', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'
-          }
+          },
+          body: JSON.stringify({ redemption: uuid })
         }).then(function(response) {
           if (!response.ok) {
             console.error(response);
+          } else {
+            refreshKeywords();
           }
         });
       }
@@ -173,17 +176,15 @@ const configureRedemptionsHandlebars = (handlebars) => {
         <span class="s6">{{this.description}}</span>
 
         <nav class="s2 right-align no-space no-margin">
+          <button class="transparent circle" onclick="manuallyTriggerRedemption('{{this.uuid}}')">
+            <i>bolt</i>
+          </button>
           <button class="transparent circle" onclick="editRedemption('{{this.uuid}}')">
             <i>edit</i>
           </button>
           <button class="transparent circle" onclick="deleteRedemption('{{this.uuid}}')">
             <i>delete</i>
           </button>
-          {{#if ../options.devMode}}
-            <button class="transparent circle" onclick="testRedemption('{{this.uuid}}')">
-              <i>bug_report</i>
-            </button>
-          {{/if}}
         </nav>
 
         {{redemptionsTableMetadata this}}
