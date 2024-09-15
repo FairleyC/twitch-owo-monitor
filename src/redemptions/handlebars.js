@@ -1,5 +1,6 @@
 var handlebars = require('handlebars');
 const { getRedemptions } = require('./service');
+const { isDevMode } = require('../utility/dev/service');
 
 const configureRedemptionsHandlebars = (handlebars) => {
   // rename to reflect redemptions?
@@ -125,6 +126,19 @@ const configureRedemptionsHandlebars = (handlebars) => {
         });
       }
 
+      function testRedemption(uuid) {
+        fetch('/api/test/redemptions/' + uuid, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        }).then(function(response) {
+          if (!response.ok) {
+            console.error(response);
+          }
+        });
+      }
+
       function refreshRedemptions() {
         fetch('/app/redemptions').then(function(response) {
           if (response.ok) {
@@ -165,6 +179,11 @@ const configureRedemptionsHandlebars = (handlebars) => {
           <button class="transparent circle" onclick="deleteRedemption('{{this.uuid}}')">
             <i>delete</i>
           </button>
+          {{#if ../options.devMode}}
+            <button class="transparent circle" onclick="testRedemption('{{this.uuid}}')">
+              <i>bug_report</i>
+            </button>
+          {{/if}}
         </nav>
 
         {{redemptionsTableMetadata this}}
@@ -191,4 +210,6 @@ var redemptionsTableTemplate = handlebars.compile(`
     {{> redemptionsTablePartial}}
 `);
 
-module.exports = { configureRedemptionsHandlebars, redemptionsTableTemplate };
+const redemptionsTableTemplateOptions = (channel, userId) => { return { redemptions: getRedemptions(), options: { devMode: isDevMode() } } }
+
+module.exports = { configureRedemptionsHandlebars, redemptionsTableTemplate, redemptionsTableTemplateOptions };

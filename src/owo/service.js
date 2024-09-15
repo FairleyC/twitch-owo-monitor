@@ -23,7 +23,7 @@ const restartOwoApplication = () => {
     owoProcess.on('exit', () => {
         console.log('[Node] OwO Restarting');
         clearTimeout(owoTimeout);
-        owoProcess = run_script('OwoApp.exe', [sensationFileOption, getPathToRedemptionsFile()], owoExitFunction)
+        setTimeout(startOwoApplication, 1000);
     });
 
     // Send the signal to closed the process.

@@ -3,11 +3,11 @@ var express = require('express'), router = express.Router();
 const { randomUUID } = require('crypto');
 
 const { checkAuthentication } = require("../twitch/auth/service");
-const { redemptionsTableTemplate } = require("./handlebars");
+const { redemptionsTableTemplate, redemptionsTableTemplateOptions } = require("./handlebars");
 const { addRedemption, removeRedemption, getRedemptions } = require("./service");
 
 router.get('/', checkAuthentication, async function (req, res) {
-    res.send(redemptionsTableTemplate({ redemptions: getRedemptions() }))
+    res.send(redemptionsTableTemplate(redemptionsTableTemplateOptions()))
 });
 
 router.delete('/:uuid', checkAuthentication, async function (req, res) {
@@ -16,7 +16,7 @@ router.delete('/:uuid', checkAuthentication, async function (req, res) {
         return res.status(404).send('Redemption not found');
     }
     removeRedemption(uuid)
-    res.status(200).send(redemptionsTableTemplate({ redemptions: getRedemptions() }))
+    res.status(200).send(redemptionsTableTemplate(redemptionsTableTemplateOptions()))
 });
 
 router.post('/', checkAuthentication, async function (req, res) {
@@ -36,7 +36,7 @@ router.post('/', checkAuthentication, async function (req, res) {
     }
 
     addRedemption(newRedemption);
-    res.status(200).send(redemptionsTableTemplate({ redemptions: getRedemptions() }))
+    res.status(200).send(redemptionsTableTemplate(redemptionsTableTemplateOptions()))
 });
 
 module.exports = router;

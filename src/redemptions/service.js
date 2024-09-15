@@ -91,6 +91,8 @@ const addRedemption = (newRedemption) => {
     writeRedemptionsToFile();
 }
 
+const getRedemptionByUuid = (uuid) => redemptions.idMap[uuid];
+
 const initializeRedemptions = () => {
     parseRedemptions();
 }
@@ -121,4 +123,6 @@ const shouldKeywordTriggerRedemption = (keyword) => {
     return found;
 }
 
-module.exports = { initializeRedemptions, cheermoteMatchesRedemptionPattern, markRedemptionsAsUsable, invalidateRedemption, getRedemptions, getPathToRedemptionsFile, addRedemption, removeRedemption, getRedemptionByKeyword, shouldKeywordTriggerRedemption };
+const isRedemptionUsable = (uuid) => redemptions.metadataMap[uuid].usable && redemptions.metadataMap[uuid].valid;
+
+module.exports = { initializeRedemptions, cheermoteMatchesRedemptionPattern, markRedemptionsAsUsable, invalidateRedemption, getRedemptions, getPathToRedemptionsFile, addRedemption, removeRedemption, getRedemptionByKeyword, getRedemptionByUuid, shouldKeywordTriggerRedemption, isRedemptionUsable };

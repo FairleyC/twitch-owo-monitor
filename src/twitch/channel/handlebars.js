@@ -111,7 +111,7 @@ var channelTemplate = handlebars.compile(`
       </body>
     </html>
   `);
-  
-  const channelTemplateOptions = (channel, userId) => { return { channel, messages: getMessages(), keywords: getKeywords(), refresh: 5, userId, redemptions: getRedemptions(), queue: getQueueStatus(), options: { devMode: isDevMode() } } }
 
-  module.exports = { channelTemplate, channelTemplateOptions };
+const channelTemplateOptions = (channel, userId) => { return { channel, messages: getMessages(), keywords: getKeywords(), refresh: 5, userId, redemptions: getRedemptions(), queue: getQueueStatus(), options: { devMode: isDevMode() } } }
+
+module.exports = { channelTemplate, channelTemplateOptions };
