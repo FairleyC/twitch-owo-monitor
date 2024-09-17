@@ -1,11 +1,9 @@
 var express = require('express'), router = express.Router();
 
 const { isOwoApplicationRunning, isOwoVestConnected } = require('../owo/service');
-const { generateTrigger } = require('../queue/trigger/service');
 const { getRedemptionByUuid, isRedemptionUsable } = require('../redemptions/service');
 const { checkAuthentication } = require("../twitch/auth/service");
-const { randomUUID } = require('crypto');
-const { addKeyword } = require('./service');
+const { processMessageForKeywords, generateTestMessageForRedemption } = require('./service');
 
 router.get('/', checkAuthentication, async function (req, res) {
     res.send(keywords);
@@ -31,22 +29,11 @@ router.post('/', checkAuthentication, async function (req, res) {
     }
 
     // should all probably go to the service.
-    const text = "This keyword was manually triggered by the Twitch Monitor."
-    const message = {
-        user: "Me",
-        color: '#888888',
-        badges: [],
-        messageParts: [{type: 'text', text}],
-        text,
-        when: Date.now(),
-    }
+    const message = generateTestMessageForRedemption(redemption);
 
-    const instance = { id: randomUUID(), prefix: redemption.prefix, number: redemption.cost, triggered: false, errored: false, description: redemption.description }
+    processMessageForKeywords(message)
 
-    addKeyword(message, [instance]);
-    generateTrigger(instance);
-
-    res.send('Keyword ManuallyTriggered');
+    res.send('Keyword Manually Triggered');
 });
 
 module.exports = router;

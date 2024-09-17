@@ -8,8 +8,8 @@ let owoConnection = false;
 
 const sensationFileOption = `--sensation-file`
 
-const closeOwoApplication = () => {
-    getSocketIoServer().emit('stop', 'Monitor Stopping, Cleanup in Progress');
+const closeOwoApplication = async () => {
+    return getSocketIoServer().emit('stop', 'Monitor Stopping, Cleanup in Progress');
 };
 
 const restartOwoApplication = () => {

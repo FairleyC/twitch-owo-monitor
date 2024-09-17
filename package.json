@@ -20,7 +20,7 @@
   },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "live": "nodemon index.js"
+    "live": "nodemon --inspect index.js"
   },
   "author": "Twitch Interactive, Inc.",
   "license": "Apache-2.0",

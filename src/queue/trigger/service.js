@@ -1,4 +1,3 @@
-const { markKeywordInstanceAsTriggered, markKeywordInstanceAsErrored } = require("../../keywords/service");
 const { getSocketIoServer } = require("../../notifications/service");
 
 let triggers = [];
@@ -22,7 +21,7 @@ const findNextTrigger = () => {
     return undefined;
 }
 
-const generateTrigger = (keywordDetails) => {
+const generateTrigger = (keywordDetails, onSuccess, onFailure) => {
     const trigger = {
         triggeringId: keywordDetails.id,
         triggeringWord: keywordDetails.prefix + keywordDetails.number,
@@ -33,12 +32,12 @@ const generateTrigger = (keywordDetails) => {
         },
         resolution: () => {
             triggerBeingProcessed = false;
-            markKeywordInstanceAsTriggered(keywordDetails.id);
+            onSuccess();
         },
         failure: (error) => {
             triggerBeingProcessed = false;
             console.error(`[Error] Trigger (${keywordDetails.id}) failed to resolve: ${error}`)
-            markKeywordInstanceAsErrored(keywordDetails.id);
+            onFailure();
         },
         attempts: 0
     }

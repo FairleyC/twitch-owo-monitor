@@ -1,9 +1,5 @@
 const { generateCheermoteHtml, generateEmoteHtml, generateMentionHtml, loadEmotes } = require("../twitch/service");
-const { generateKeywordHtml, addKeyword } = require("../keywords/service");
-const { isDevMode } = require("../utility/dev/service");
-const { shouldKeywordTriggerRedemption, getRedemptionByKeyword } = require("../redemptions/service");
-const { randomUUID } = require('crypto');
-const { generateTrigger } = require("../queue/trigger/service");
+const { generateKeywordHtml, processMessageForKeywords } = require("../keywords/service");
 
 let messages = [];
 const limit = 25;
@@ -44,81 +40,12 @@ const processMessage = async (event) => {
         when: Date.now()
     }
 
-    if (isDevMode()) {
-        processDevModeKeyword(message);
-    } else {
-        if (event.isCheer) {
-            processCheerKeyword(message);
-        }
-    }
+    processMessageForKeywords(message);
+
     event.messageParts.filter(part => part.type === 'emote')
-      .map(part => loadEmotes(part.emote.owner_id))
+        .map(part => loadEmotes(part.emote.owner_id))
 
     addMessage(message);
-}
-
-// move to keywords service?
-const processCheerKeyword = (message) => {
-    const keywordInstances = message.messageParts
-        .filter(part => part.type === 'cheermote')
-        .filter(part => shouldKeywordTriggerRedemption(part.cheermote.prefix + part.cheermote.bits))
-        .map(part => ({ id: randomUUID(), prefix: part.cheermote.prefix, number: part.cheermote.bits, triggered: false, errored: false, description: getRedemptionByKeyword(part.cheermote.prefix + part.cheermote.bits).description }))
-
-    if (keywordInstances.length > 0) {
-        addKeyword(message, keywordInstances);
-        keywordInstances.forEach(keywordInstance => generateTrigger(keywordInstance))
-    }
-}
-
-// move to keywords service?
-const processDevModeKeyword = (message) => {
-    const keywordName = "owo"
-    const keywordPattern = new RegExp(String.raw`\b${keywordName}\d+\b`)
-    if (keywordPattern.test(message.text)) {
-        const keywordInstances = [];
-        const reprocessedMessageParts = message.messageParts.reduce((acc, part) => {
-            if (part.type === 'text' && keywordPattern.test(part.text)) {
-                const words = part.text.split(' ')
-
-                let newText = [];
-                let currentText = [];
-                words.forEach(word => {
-                    if (keywordPattern.test(word)) {
-                        if (currentText.length > 0) {
-                            currentText.push('')
-                            newText.push(currentText.join(' '))
-                        }
-                        currentText = ['']
-                        newText.push(word)
-                    } else {
-                        currentText.push(word)
-                    }
-                });
-                if (currentText.length > 0) {
-                    newText.push(currentText.join(' '))
-                }
-
-                const digits = /\d+/
-                newParts = newText.forEach(text => {
-                    if (keywordPattern.test(text)) {
-                        const [number] = text.match(digits)
-                        acc.push(Object.assign({}, part, { type: 'keyword', text, keyword: { prefix: keywordName, number } }))
-                        keywordInstances.push({ id: randomUUID(), prefix: keywordName, number, triggered: false, errored: false, description: "this is a test" })
-                    } else {
-                        acc.push(Object.assign({}, part, { text }))
-                    }
-                });
-            } else {
-                acc.push(part)
-            }
-            return acc
-        }, [])
-
-        // TODO: should I change "keywords" to "instances"?
-        message.messageParts = reprocessedMessageParts;
-        addKeyword(message, keywordInstances);
-        keywordInstances.forEach(keywordInstance => generateTrigger(keywordInstance))
-    }
 }
 
 module.exports = { generateMessageHtml, getMessages, addMessage, processMessage, resetMessages };

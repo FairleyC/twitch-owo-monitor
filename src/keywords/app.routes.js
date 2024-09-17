@@ -1,9 +1,8 @@
 var express = require('express'), router = express.Router();
 
-const { generateTrigger, cancelTrigger } = require('../queue/trigger/service');
 const { checkAuthentication } = require("../twitch/auth/service");
 const { keywordsStreamTemplate } = require("./handlebars");
-const { getKeywords, findKeywordInstanceByTrigger } = require('./service');
+const { getKeywords, findKeywordInstanceByTrigger, retriggerKeywordInstance, cancelKeywordInstance } = require('./service');
 
 router.get('/', checkAuthentication, async function (req, res) {
     const userId = req.session.passport.user.data[0].id
@@ -28,14 +27,11 @@ router.post('/:uuid', checkAuthentication, async function (req, res) {
     }
 
     if (req.body.replay) {
-        generateTrigger(instance)
-        instance.triggered = false;
-        instance.errored = false;
+        retriggerKeywordInstance(instance);
     }
 
     if (req.body.cancel) {
-        cancelTrigger(uuid)
-        instance.triggered = true;
+        cancelKeywordInstance(instance);
     }
 
     res.send(keywordsStreamTemplate({ keywords: getKeywords(), userId }))
