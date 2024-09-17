@@ -81,8 +81,15 @@ const cleanup = (code) => {
   process.exit(0);
 }
 
+const crashCleanup = (error) => {
+  closeOwoApplication();
+  throw error;
+}
+
 process.once('SIGINT', cleanup);
 process.once('SIGUSR2', cleanup);
+process.once("uncaughtException", crashCleanup);
+process.once("unhandledRejection", crashCleanup);
 
 //
 //
