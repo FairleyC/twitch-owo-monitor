@@ -2,7 +2,7 @@
 
 const { processMessage, resetMessages } = require("../../chat/service");
 const { connectToTwitch } = require("../auth/service");
-const { loadEmotes, loadCheermotes, loadBadges } = require("../service");
+const { loadCheermotes, loadBadges, loadEmotesByChannel } = require("../service");
 const { resetKeywords } = require("../../keywords/service");
 
 let channel = {};
@@ -39,7 +39,7 @@ const connectToTwitchChannel = async (channelName, user) => {
     channel = { name: channelName, broadcaster: broadcaster };
 
     // load static resources for the channel and global.
-    await loadEmotes(broadcaster.id);
+    await loadEmotesByChannel(broadcaster.id);
     await loadCheermotes();
     await loadBadges(broadcaster.id);
 

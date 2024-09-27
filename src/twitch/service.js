@@ -17,10 +17,6 @@ const loadEmotes = async (channelId) => {
         storeEmotes(globalEmotes);
         globalEmotesAreLoaded = true;
     }
-
-    if (hasEmote(channelId)) {
-        return;
-    }
     
     let channelEmotes = [];
     try {
@@ -29,6 +25,17 @@ const loadEmotes = async (channelId) => {
         console.error(`Failed to get emotes: ${e}`);
     }
     storeEmotes(channelEmotes);
+}
+
+const loadEmotesByChannel = async (channelId) => {
+    loadEmotes(channelId);
+}
+
+const loadEmotesByEmote = async (emote) => {
+    if (hasEmote(emote.id)) {
+        return;
+    }
+    loadEmotes(emote.owner_id);
 }
 
 const storeEmotes = (newEmotes) => {
@@ -118,4 +125,4 @@ const generateMentionHtml = (mention, currentUserId, mentionedName) => {
 }
 
 
-module.exports = { loadEmotes, getEmotes, generateEmoteHtml, loadCheermotes, getCheermotes, generateCheermoteHtml, loadBadges, getBadges, generateBadgeHtml, generateMentionHtml };
+module.exports = { loadEmotesByChannel, loadEmotesByEmote, getEmotes, generateEmoteHtml, loadCheermotes, getCheermotes, generateCheermoteHtml, loadBadges, getBadges, generateBadgeHtml, generateMentionHtml };

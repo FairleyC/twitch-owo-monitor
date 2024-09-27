@@ -1,4 +1,4 @@
-const { generateCheermoteHtml, generateEmoteHtml, generateMentionHtml, loadEmotes } = require("../twitch/service");
+const { generateCheermoteHtml, generateEmoteHtml, generateMentionHtml, loadEmotesByEmote } = require("../twitch/service");
 const { generateKeywordHtml, processMessageForKeywords } = require("../keywords/service");
 
 let messages = [];
@@ -43,7 +43,7 @@ const processMessage = async (event) => {
     processMessageForKeywords(message);
 
     event.messageParts.filter(part => part.type === 'emote')
-        .map(part => loadEmotes(part.emote.owner_id))
+        .map(part => loadEmotesByEmote(part.emote))
 
     addMessage(message);
 }
