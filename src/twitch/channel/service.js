@@ -35,7 +35,6 @@ const connectToTwitchChannel = async (channelName, user) => {
         return res.status(404).send(`Channel ${channelName} not found`);
     }
 
-
     channel = { name: channelName, broadcaster: broadcaster };
 
     // load static resources for the channel and global.
